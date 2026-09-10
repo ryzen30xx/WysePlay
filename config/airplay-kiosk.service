@@ -9,7 +9,7 @@ Type=simple
 User=@TARGET_USER@
 Group=@TARGET_USER@
 PAMName=login
-Environment=HOME=@TARGET_HOME@
+Environment=HOME=@TARGET_HOME@ PYTHONUNBUFFERED=1
 StandardOutput=journal
 StandardError=journal
 ExecStartPre=/bin/sh -c "systemctl stop getty@tty1.service || true"

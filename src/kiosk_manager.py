@@ -1,5 +1,9 @@
 import os, sys, time, subprocess, re, signal, threading, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 import make_wallpaper
 
 try:
@@ -84,12 +88,64 @@ def manage_wifi_gui():
                         WIFI_GUI_PROC.kill()
                 WIFI_GUI_PROC = None
 
+def get_uxplay_tcp_connections(pid):
+    """
+    Returns (estab_count, close_wait_count) for the given UxPlay PID.
+    Uses 'ss -t -p' to inspect active TCP sockets.
+    """
+    if not pid:
+        return 0, 0
+    try:
+        out = subprocess.check_output(f"ss -t -p 2>/dev/null | grep -E 'pid={pid}[,)]'", shell=True).decode()
+        estab = 0
+        close_wait = 0
+        for line in out.splitlines():
+            parts = line.split()
+            if parts:
+                state = parts[0].upper()
+                if state == 'ESTAB':
+                    estab += 1
+                elif 'CLOSE' in state or 'WAIT' in state:
+                    close_wait += 1
+        return estab, close_wait
+    except Exception:
+        return 0, 0
+
 def window_watcher():
-    """Monitors active X11 windows: locks inputs, forces screen awake on stream, restores wallpaper on end."""
+    """
+    Monitors active X11 windows & TCP connection health:
+    - Locks inputs during stream
+    - Forces screen awake on stream start
+    - Detects client disconnect (window closed OR TCP socket teardown/CLOSE_WAIT)
+    - Automatically terminates zombie UxPlay on disconnect and restores standby wallpaper
+    """
     def _watch():
         was_active = False
+        no_estab_ticks = 0
+
         while True:
             active = has_active_video_window()
+
+            # Active stream health check: if window is open but TCP connection closed/hung
+            if active:
+                with STATE_LOCK:
+                    proc = CURRENT_PROC
+                if proc and proc.poll() is None:
+                    estab, close_wait = get_uxplay_tcp_connections(proc.pid)
+                    if estab == 0 or close_wait > 0:
+                        no_estab_ticks += 1
+                        # If no established connection or lingering in CLOSE_WAIT for >= 1s (~3 ticks)
+                        if no_estab_ticks >= 3:
+                            print(f"[Kiosk] Client disconnected (ESTAB={estab}, CLOSE_WAIT={close_wait}). Resetting UxPlay...")
+                            stop_uxplay(reason="Client disconnected (socket closed)")
+                            no_estab_ticks = 0
+                            time.sleep(0.3)
+                            continue
+                    else:
+                        no_estab_ticks = 0
+            else:
+                no_estab_ticks = 0
+
             if active != was_active:
                 set_inputs(active)
                 if active and not was_active:
@@ -104,6 +160,7 @@ def window_watcher():
                     print("[Kiosk] AirPlay stream ended: Restored standby wallpaper & re-enabled 30s DPMS sleep.")
                 was_active = active
             time.sleep(0.3)
+
     t = threading.Thread(target=_watch, daemon=True, name="WindowWatcher")
     t.start()
 
@@ -279,10 +336,11 @@ def main():
             'uxplay',
             '-nh',
             '-n', monitor_name,
+            '-nohold',
             '-fs',
             '-s', f'{res}@{rate}',
             '-fps', str(rate),
-            '-reset', '1',
+            '-reset', '3',
             '-nofreeze',
             '-vs', 'ximagesink'
         ] + extra_flags
@@ -298,15 +356,15 @@ def main():
         # When UxPlay exits, ensure inputs are unlocked and give brief pause
         set_inputs(False)
 
-        # Defensive backoff: if UxPlay crashed or exited too quickly, avoid tight busy loop
+        # Defensive backoff: only wait if UxPlay crashed immediately (< 2.0s and non-zero exit)
         elapsed = time.time() - start_time
-        if elapsed < 2.0 or ret != 0:
+        if elapsed < 2.0 and ret != 0:
             if not is_physical_display_connected():
                 continue
-            print(f"[Kiosk] UxPlay exited (code {ret}, elapsed {elapsed:.1f}s). Waiting 2s before restart...")
+            print(f"[Kiosk] UxPlay exited prematurely (code {ret}, elapsed {elapsed:.1f}s). Waiting 2s before restart...")
             time.sleep(2.0)
         else:
-            time.sleep(0.5)
+            time.sleep(0.3)
 
 if __name__ == '__main__':
     main()
