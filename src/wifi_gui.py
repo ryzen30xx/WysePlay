@@ -227,21 +227,14 @@ class WifiSetupApp:
         self.password_ssid = None
         self.is_connecting = False
         self.is_scanning = False
+        self.has_wifi_device = True
         self.row_widgets = []
+        self.empty_widget = None
 
         self._build_ui()
         self._bind_keys()
 
-        # Initial fast load with discoverable networks so UI is ready instantly
-        fallback_list = [
-            {"ssid": "Văn phòng Tầng 1", "signal": 95, "security": "WPA2"},
-            {"ssid": "Home-HighSpeed-5G", "signal": 80, "security": "WPA2"},
-            {"ssid": "Apple-Guest-Free", "signal": 65, "security": "--"},
-            {"ssid": "Coffee_Lounge", "signal": 50, "security": "WPA2"},
-        ]
-        self._apply_network_data(fallback_list)
-
-        # Start initial real scan in background
+        # Start initial real scan in background (NO DUMMY DATA)
         self.refresh_networks(force_rescan=True)
 
         # Start 10-second auto-scan timer
@@ -357,6 +350,8 @@ class WifiSetupApp:
         self.root.bind("<Return>", self._on_enter_key)
         self.root.bind("<Escape>", self._on_escape_key)
         self.root.bind("<F5>", lambda e: self.refresh_networks(force_rescan=True))
+        self.root.bind("<r>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
+        self.root.bind("<R>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
 
         self.root.focus_force()
 
@@ -376,6 +371,9 @@ class WifiSetupApp:
         if self.password_ssid is not None:
             self._do_connect()
         else:
+            if not self.networks:
+                self.refresh_networks(force_rescan=True)
+                return
             if 0 <= self.selected_index < len(self.networks):
                 net = self.networks[self.selected_index]
                 sec = net.get("security", "")
@@ -436,51 +434,78 @@ class WifiSetupApp:
             return
         self.is_scanning = True
         if not silent:
-            self.lbl_scanning.config(text="Đang quét...")
+            self.lbl_scanning.config(text="Đang tìm kiếm mạng Wi-Fi...")
 
         def _worker():
-            if force_rescan:
+            # 1. Check if hardware Wi-Fi card exists
+            has_wifi_dev = False
+            try:
+                dev_out = subprocess.check_output("nmcli -t -f TYPE dev status 2>/dev/null", shell=True).decode()
+                for line in dev_out.splitlines():
+                    if line.strip() == "wifi":
+                        has_wifi_dev = True
+                        break
+            except Exception:
+                pass
+
+            fresh_list = []
+            if has_wifi_dev:
                 try:
-                    subprocess.run("sudo nmcli dev wifi rescan 2>/dev/null", shell=True)
+                    subprocess.run("sudo rfkill unblock wifi 2>/dev/null", shell=True)
+                    subprocess.run("sudo nmcli radio wifi on 2>/dev/null", shell=True)
+                    if force_rescan:
+                        subprocess.run("sudo nmcli dev wifi rescan 2>/dev/null", shell=True)
                 except Exception:
                     pass
 
-            fresh_list = []
-            try:
-                out = subprocess.check_output(
-                    "sudo nmcli -t -f SSID,SIGNAL,SECURITY dev wifi list", shell=True
-                ).decode()
-                seen = set()
-                for line in out.splitlines():
-                    parts = line.split(":")
-                    if len(parts) >= 2:
-                        ssid = parts[0].strip()
-                        sig = parts[1].strip()
-                        sec = parts[2].strip() if len(parts) > 2 else ""
-                        if ssid and ssid not in seen:
-                            seen.add(ssid)
-                            try:
-                                s_val = int(sig)
-                            except Exception:
-                                s_val = 50
-                            fresh_list.append({"ssid": ssid, "signal": s_val, "security": sec})
-            except Exception as e:
-                print("[WiFi Scan Error]:", e)
+                try:
+                    out = subprocess.check_output(
+                        "sudo nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null", shell=True
+                    ).decode()
+                    seen = set()
+                    for line in out.splitlines():
+                        if not line.strip():
+                            continue
+                        safe_line = line.replace(r"\:", "__COLON__")
+                        parts = safe_line.split(":")
+                        if len(parts) >= 4:
+                            in_use = (parts[0].strip() == "*")
+                            ssid = parts[1].replace("__COLON__", ":").strip()
+                            sig = parts[2].strip()
+                            sec = parts[3].replace("__COLON__", ":").strip()
+                        elif len(parts) >= 3:
+                            in_use = False
+                            ssid = parts[0].replace("__COLON__", ":").strip()
+                            sig = parts[1].strip()
+                            sec = parts[2].replace("__COLON__", ":").strip()
+                        else:
+                            continue
 
-            if not fresh_list:
-                fresh_list = [
-                    {"ssid": "Văn phòng Tầng 1", "signal": 95, "security": "WPA2"},
-                    {"ssid": "Home-HighSpeed-5G", "signal": 80, "security": "WPA2"},
-                    {"ssid": "Apple-Guest-Free", "signal": 65, "security": "--"},
-                    {"ssid": "Coffee_Lounge", "signal": 50, "security": "WPA2"},
-                ]
+                        if not ssid or ssid == "--" or ssid in seen:
+                            continue
+                        seen.add(ssid)
+                        try:
+                            s_val = int(sig)
+                        except Exception:
+                            s_val = 50
+                        fresh_list.append({
+                            "ssid": ssid,
+                            "signal": s_val,
+                            "security": sec if sec else "--",
+                            "in_use": in_use
+                        })
+                    fresh_list.sort(key=lambda x: (x.get("in_use", False), x.get("signal", 0)), reverse=True)
+                except Exception as e:
+                    print("[WiFi Scan Error]:", e)
 
-            self.root.after(0, lambda: self._apply_network_data(fresh_list))
+            # Strictly REAL data: absolutely NO dummy fallback!
+            self.root.after(0, lambda: self._apply_network_data(fresh_list, has_wifi_dev))
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _apply_network_data(self, new_list):
+    def _apply_network_data(self, new_list, has_wifi_dev=True):
         self.is_scanning = False
+        self.has_wifi_device = has_wifi_dev
         self.lbl_scanning.config(text="")
 
         target_ssid = self.password_ssid if self.password_ssid else self.focused_ssid
@@ -490,6 +515,30 @@ class WifiSetupApp:
         for r in self.row_widgets:
             r["canvas"].destroy()
         self.row_widgets = []
+
+        if hasattr(self, "empty_widget") and self.empty_widget:
+            self.empty_widget.destroy()
+            self.empty_widget = None
+
+        if not self.networks:
+            self.empty_widget = tk.Frame(self.scrollable_frame, bg=self.COLOR_MODAL)
+            self.empty_widget.pack(pady=40, fill="x")
+
+            if not has_wifi_dev:
+                title = "Không tìm thấy card Wi-Fi"
+                sub = "Vui lòng cắm dây cáp mạng LAN hoặc USB Wi-Fi\nNhấn [F5] để quét lại sau khi cắm"
+            else:
+                title = "Không tìm thấy mạng Wi-Fi nào khả dụng"
+                sub = "Đang kiểm tra sóng Wi-Fi xung quanh...\nVui lòng kiểm tra router hoặc nhấn [F5] để quét lại"
+
+            lbl_t = tk.Label(self.empty_widget, text=title, font=(FONT_FAMILY_DISP, 13, "bold"),
+                             fg="#ffffff", bg=self.COLOR_MODAL)
+            lbl_t.pack(pady=(0, 6))
+
+            lbl_s = tk.Label(self.empty_widget, text=sub, font=(FONT_FAMILY_TEXT, 10),
+                             fg=self.COLOR_MUTED, bg=self.COLOR_MODAL, justify="center")
+            lbl_s.pack()
+            return
 
         new_index = 0
         if target_ssid:
