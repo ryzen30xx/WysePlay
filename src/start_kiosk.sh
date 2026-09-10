@@ -6,10 +6,10 @@ if [ -f "$HOME/.Xresources" ]; then
     xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
 fi
 
-# Configure DPMS monitor sleep (Screen sleeps after 10 mins idle, woke on connection)
+# Configure DPMS monitor sleep (Screen sleeps after 30s idle, woke on connection)
 xset +dpms 2>/dev/null || true
-xset dpms 600 600 600 2>/dev/null || true
-xset s 600 600 2>/dev/null || true
+xset dpms 30 30 30 2>/dev/null || true
+xset s 30 30 2>/dev/null || true
 
 # 1. Start clean Openbox in background
 OPENBOX_RC="${XDG_CONFIG_HOME:-$HOME/.config}/openbox/rc.xml"

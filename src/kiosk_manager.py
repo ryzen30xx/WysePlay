@@ -93,13 +93,15 @@ def window_watcher():
             if active != was_active:
                 set_inputs(active)
                 if active and not was_active:
-                    # Stream started: instantly wake up monitor from DPMS sleep
+                    # Stream started: instantly wake up monitor and disable DPMS sleep while streaming
                     subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
-                    print("[Kiosk] AirPlay stream started: Woke up monitor from sleep.")
+                    subprocess.run('DISPLAY=:0 xset -dpms s off 2>/dev/null', shell=True)
+                    print("[Kiosk] AirPlay stream started: Woke up monitor & kept screen awake.")
                 elif not active and was_active:
-                    # Stream ended: repaint clean standby wallpaper
+                    # Stream ended: repaint clean standby wallpaper and re-enable 30s DPMS
                     subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
-                    print("[Kiosk] AirPlay stream ended: Restored standby wallpaper.")
+                    subprocess.run('DISPLAY=:0 xset +dpms dpms 30 30 30 s 30 30 2>/dev/null', shell=True)
+                    print("[Kiosk] AirPlay stream ended: Restored standby wallpaper & re-enabled 30s DPMS sleep.")
                 was_active = active
             time.sleep(0.3)
     t = threading.Thread(target=_watch, daemon=True, name="WindowWatcher")
@@ -187,9 +189,9 @@ def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE
     os.environ['DISPLAY'] = ':0'
 
-    # Clear root screen and configure DPMS monitor sleep (10 mins idle, wakes on stream)
+    # Clear root screen and configure DPMS monitor sleep (30s idle, wakes on stream)
     subprocess.run('DISPLAY=:0 xsetroot -solid "#000000"', shell=True)
-    subprocess.run('DISPLAY=:0 xset +dpms dpms 600 600 600 s 600 600 2>/dev/null', shell=True)
+    subprocess.run('DISPLAY=:0 xset +dpms dpms 30 30 30 s 30 30 2>/dev/null', shell=True)
     
     # Ensure inputs are unlocked in standby
     set_inputs(False)
