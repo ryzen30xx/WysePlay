@@ -1,4 +1,4 @@
-import os, sys, time, subprocess, re, signal, threading
+import os, sys, time, subprocess, re, signal, threading, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import make_wallpaper
 
@@ -107,19 +107,52 @@ def window_watcher():
     t = threading.Thread(target=_watch, daemon=True, name="WindowWatcher")
     t.start()
 
-def restart_uxplay_for_display(new_display_info):
-    """Gracefully terminates running UxPlay so supervisor loop restarts with new display profile."""
+def is_physical_display_connected():
+    """Checks if at least one physical display is connected via DRM sysfs or xrandr."""
+    # 1. Fast check via kernel DRM sysfs (< 1ms)
+    try:
+        status_files = glob.glob("/sys/class/drm/card*-*/status")
+        if status_files:
+            for sf in status_files:
+                try:
+                    with open(sf, "r") as f:
+                        if f.read().strip() == "connected":
+                            return True
+                except Exception:
+                    pass
+            return False
+    except Exception:
+        pass
+
+    # 2. Fallback check via xrandr
+    try:
+        out = subprocess.check_output("DISPLAY=:0 xrandr 2>/dev/null", shell=True).decode()
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[1] == 'connected':
+                return True
+    except Exception:
+        pass
+
+    return False
+
+def stop_uxplay(reason="Display disconnected"):
+    """Gracefully terminates running UxPlay."""
     global CURRENT_PROC
-    print(f"[Hotplug] Display change detected! New target: {new_display_info}")
     with STATE_LOCK:
         if CURRENT_PROC and CURRENT_PROC.poll() is None:
-            print("[Hotplug] Terminating UxPlay to apply new display profile...")
+            print(f"[Kiosk] {reason}. Terminating UxPlay server...")
             try:
                 CURRENT_PROC.terminate()
                 CURRENT_PROC.wait(timeout=2.0)
             except Exception:
                 if CURRENT_PROC and CURRENT_PROC.poll() is None:
                     CURRENT_PROC.kill()
+
+def restart_uxplay_for_display(new_display_info):
+    """Gracefully terminates running UxPlay so supervisor loop restarts with new display profile."""
+    print(f"[Hotplug] Display change detected! New target: {new_display_info}")
+    stop_uxplay(reason="Display configuration changed")
 
 def hotplug_and_network_watcher():
     """Watches for display hotplug (via udev/DRM + RandR polling) and network state changes."""
@@ -162,23 +195,27 @@ def hotplug_and_network_watcher():
 
             # 2. Check Display changes
             try:
-                if event_triggered:
-                    time.sleep(0.5)
-                    subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
-                    time.sleep(0.5)
+                display_connected = is_physical_display_connected()
+                if not display_connected:
+                    stop_uxplay(reason="Physical display disconnected")
+                else:
+                    if event_triggered:
+                        time.sleep(0.5)
+                        subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
+                        time.sleep(0.5)
 
-                res, rate, name = make_wallpaper.get_display_info()
-                new_info = (name, res, rate)
+                    res, rate, name = make_wallpaper.get_display_info()
+                    new_info = (name, res, rate)
 
-                if CURRENT_DISPLAY is not None and new_info != CURRENT_DISPLAY:
-                    time.sleep(0.5)
-                    subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
-                    time.sleep(0.5)
-                    res2, rate2, name2 = make_wallpaper.get_display_info()
-                    stable_info = (name2, res2, rate2)
+                    if CURRENT_DISPLAY is not None and new_info != CURRENT_DISPLAY:
+                        time.sleep(0.5)
+                        subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
+                        time.sleep(0.5)
+                        res2, rate2, name2 = make_wallpaper.get_display_info()
+                        stable_info = (name2, res2, rate2)
 
-                    if stable_info != CURRENT_DISPLAY:
-                        restart_uxplay_for_display(stable_info)
+                        if stable_info != CURRENT_DISPLAY:
+                            restart_uxplay_for_display(stable_info)
             except Exception as e:
                 print("[Hotplug] Check error:", e)
 
@@ -211,6 +248,17 @@ def main():
     manage_wifi_gui()
 
     while True:
+        # Check if at least one physical display is connected before starting UxPlay
+        if not is_physical_display_connected():
+            print("[Kiosk] No physical display connected. Pausing UxPlay server to prevent blind connections...")
+            stop_uxplay(reason="No physical display connected")
+            while not is_physical_display_connected():
+                time.sleep(1.0)
+            print("[Kiosk] Physical display detected! Resuming UxPlay server...")
+            time.sleep(0.5)
+            subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
+            time.sleep(0.5)
+
         # 1. Detect display and generate wallpaper
         monitor_name, res, rate = make_wallpaper.generate_wallpaper()
         CURRENT_DISPLAY = (monitor_name, res, rate)
@@ -253,6 +301,8 @@ def main():
         # Defensive backoff: if UxPlay crashed or exited too quickly, avoid tight busy loop
         elapsed = time.time() - start_time
         if elapsed < 2.0 or ret != 0:
+            if not is_physical_display_connected():
+                continue
             print(f"[Kiosk] UxPlay exited (code {ret}, elapsed {elapsed:.1f}s). Waiting 2s before restart...")
             time.sleep(2.0)
         else:
