@@ -370,6 +370,10 @@ configure_systemd_service() {
         chmod 644 "${SERVICE_DEST}"
         systemctl daemon-reload
         systemctl enable airplay-kiosk.service
+        
+        # Mask systemd sleep/suspend so appliance server runs 24/7 (monitor sleeps via DPMS)
+        systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+        
         log_success "Đã kích hoạt dịch vụ: airplay-kiosk.service"
 
         if [[ "$AUTO_START" == true ]]; then

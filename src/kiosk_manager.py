@@ -85,18 +85,23 @@ def manage_wifi_gui():
                 WIFI_GUI_PROC = None
 
 def window_watcher():
-    """Monitors active X11 windows to automatically lock inputs ONLY while AirPlay is streaming."""
+    """Monitors active X11 windows: locks inputs, forces screen awake on stream, restores wallpaper on end."""
     def _watch():
         was_active = False
         while True:
             active = has_active_video_window()
             if active != was_active:
                 set_inputs(active)
-                if not active and was_active:
-                    # Video stream just ended -> repaint clean standby wallpaper
+                if active and not was_active:
+                    # Stream started: instantly wake up monitor from DPMS sleep
+                    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
+                    print("[Kiosk] AirPlay stream started: Woke up monitor from sleep.")
+                elif not active and was_active:
+                    # Stream ended: repaint clean standby wallpaper
                     subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+                    print("[Kiosk] AirPlay stream ended: Restored standby wallpaper.")
                 was_active = active
-            time.sleep(0.4)
+            time.sleep(0.3)
     t = threading.Thread(target=_watch, daemon=True, name="WindowWatcher")
     t.start()
 
@@ -182,8 +187,9 @@ def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE
     os.environ['DISPLAY'] = ':0'
 
-    # Clear root screen
+    # Clear root screen and configure DPMS monitor sleep (10 mins idle, wakes on stream)
     subprocess.run('DISPLAY=:0 xsetroot -solid "#000000"', shell=True)
+    subprocess.run('DISPLAY=:0 xset +dpms dpms 600 600 600 s 600 600 2>/dev/null', shell=True)
     
     # Ensure inputs are unlocked in standby
     set_inputs(False)
