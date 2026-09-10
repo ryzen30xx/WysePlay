@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs & temporary files
+*.log
+/tmp/
+*.swp
+*~
+*.bak
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Screenshots & test artifacts
+test_*.png
+clean_*.png
+apple_*.png
+lan_*.png
+screenshot.png
+standby.png

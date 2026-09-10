@@ -1,0 +1,21 @@
+[Unit]
+Description=AirPlay Kiosk Receiver (UxPlay)
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=@TARGET_USER@
+Group=@TARGET_USER@
+PAMName=login
+Environment=HOME=@TARGET_HOME@
+StandardOutput=journal
+StandardError=journal
+ExecStartPre=/bin/sh -c "systemctl stop getty@tty1.service || true"
+ExecStart=/usr/bin/xinit /opt/airplay/start_kiosk.sh -- :0 vt1 -nocursor
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
