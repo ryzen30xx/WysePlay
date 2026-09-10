@@ -87,12 +87,15 @@ def manage_wifi_gui():
 def window_watcher():
     """Monitors active X11 windows to automatically lock inputs ONLY while AirPlay is streaming."""
     def _watch():
+        was_active = False
         while True:
             active = has_active_video_window()
-            if active:
-                set_inputs(True)
-            else:
-                set_inputs(False)
+            if active != was_active:
+                set_inputs(active)
+                if not active and was_active:
+                    # Video stream just ended -> repaint clean standby wallpaper
+                    subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+                was_active = active
             time.sleep(0.4)
     t = threading.Thread(target=_watch, daemon=True, name="WindowWatcher")
     t.start()
@@ -223,6 +226,8 @@ def main():
             '-fs',
             '-s', f'{res}@{rate}',
             '-fps', str(rate),
+            '-reset', '1',
+            '-nofreeze',
             '-vs', 'ximagesink'
         ] + extra_flags
 

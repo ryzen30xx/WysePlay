@@ -236,6 +236,7 @@ install_dependencies() {
         xinit
         openbox
         x11-xserver-utils
+        x11-utils
         xinput
         xdotool
         unclutter
