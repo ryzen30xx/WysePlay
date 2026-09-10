@@ -230,12 +230,20 @@ def main():
         with STATE_LOCK:
             CURRENT_PROC = subprocess.Popen(cmd)
 
+        start_time = time.time()
         # Block until UxPlay exits (either closed, crashed, or terminated by hotplug watcher)
-        CURRENT_PROC.wait()
+        ret = CURRENT_PROC.wait()
         
         # When UxPlay exits, ensure inputs are unlocked and give brief pause
         set_inputs(False)
-        time.sleep(0.5)
+
+        # Defensive backoff: if UxPlay crashed or exited too quickly, avoid tight busy loop
+        elapsed = time.time() - start_time
+        if elapsed < 2.0 or ret != 0:
+            print(f"[Kiosk] UxPlay exited (code {ret}, elapsed {elapsed:.1f}s). Waiting 2s before restart...")
+            time.sleep(2.0)
+        else:
+            time.sleep(0.5)
 
 if __name__ == '__main__':
     main()

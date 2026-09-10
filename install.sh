@@ -232,6 +232,7 @@ install_dependencies() {
 
     PACKAGES=(
         xserver-xorg
+        xserver-xorg-legacy
         xinit
         openbox
         x11-xserver-utils
@@ -239,6 +240,7 @@ install_dependencies() {
         xdotool
         unclutter
         feh
+        scrot
         python3
         python3-pil
         python3-pil.imagetk
@@ -248,12 +250,26 @@ install_dependencies() {
         avahi-daemon
         libnss-mdns
         uxplay
+        gstreamer1.0-plugins-base
+        gstreamer1.0-plugins-good
+        gstreamer1.0-plugins-bad
+        gstreamer1.0-libav
+        gstreamer1.0-gl
+        gstreamer1.0-x
+        gstreamer1.0-alsa
         fontconfig
         pulseaudio
     )
 
     log_info "Cài đặt các gói: ${PACKAGES[*]}"
     apt-get install -y --no-install-recommends "${PACKAGES[@]}"
+
+    # Configure Xwrapper for rootless Xorg console access under systemd
+    mkdir -p /etc/X11
+    cat << 'XWRAP_EOF' > /etc/X11/Xwrapper.config
+allowed_users=anybody
+needs_root_rights=yes
+XWRAP_EOF
 
     log_success "Đã hoàn thành cài đặt toàn bộ gói phụ thuộc hệ thống."
 }
@@ -312,7 +328,7 @@ configure_user_environment() {
     log_step "Cấu hình môi trường đồ họa người dùng (${TARGET_USER})..."
 
     # Add user to required hardware groups
-    for grp in video audio input netdev; do
+    for grp in video audio input netdev tty; do
         if getent group "$grp" >/dev/null 2>&1; then
             usermod -a -G "$grp" "$TARGET_USER" || true
         fi
