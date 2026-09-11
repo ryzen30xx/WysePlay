@@ -59,8 +59,9 @@ def get_asset_file(filename):
             return c
     return candidates[0]
 
-FONT_DISPLAY_BOLD = get_font_file("SFProDisplay-Bold.ttf")
-FONT_DISPLAY_SEMI = get_font_file("SFProDisplay-Semibold.ttf")
+FONT_DISPLAY_HEAVY = get_font_file("SFProDisplay-Heavy.ttf")
+FONT_DISPLAY_BOLD  = get_font_file("SFProDisplay-Bold.ttf")
+FONT_DISPLAY_SEMI  = get_font_file("SFProDisplay-Semibold.ttf")
 FONT_DISPLAY_MED  = get_font_file("SFProDisplay-Medium.ttf")
 FONT_TEXT_BOLD    = get_font_file("SFProText-Bold.ttf")
 FONT_TEXT_SEMI    = get_font_file("SFProText-Semibold.ttf")
@@ -321,25 +322,25 @@ class WifiKioskApp:
 
 
         try:
-            font_title = ImageFont.truetype(FONT_DISPLAY_BOLD, int(42 * scale))
-            font_label = ImageFont.truetype(FONT_TEXT_MED, int(17 * scale))
-            font_name  = ImageFont.truetype(FONT_DISPLAY_BOLD, int(20 * scale))
-            font_status= ImageFont.truetype(FONT_TEXT_MED, int(15 * scale))
-            font_inst1 = ImageFont.truetype(FONT_TEXT_REG, int(15 * scale))
-            font_inst2 = ImageFont.truetype(FONT_TEXT_REG, int(14 * scale))
-            font_hint  = ImageFont.truetype(FONT_TEXT_REG, int(11 * scale))
+            font_title = ImageFont.truetype(FONT_DISPLAY_HEAVY, int(50 * scale))
+            font_label = ImageFont.truetype(FONT_TEXT_SEMI, int(17 * scale))
+            font_name  = ImageFont.truetype(FONT_DISPLAY_BOLD, int(21 * scale))
+            font_status= ImageFont.truetype(FONT_TEXT_SEMI, int(17 * scale))
+            font_inst1 = ImageFont.truetype(FONT_TEXT_MED, int(17 * scale))
+            font_inst2 = ImageFont.truetype(FONT_TEXT_MED, int(16 * scale))
+            font_hint  = ImageFont.truetype(FONT_TEXT_MED, int(12 * scale))
         except Exception:
             font_title = font_label = font_name = font_status = font_inst1 = font_inst2 = font_hint = ImageFont.load_default()
 
         # AirPlay Icon
         try:
             icon_orig = Image.open(get_asset_file("airplay_large.png")).convert("RGBA")
-            target_icon_w = int(112 * scale)
+            target_icon_w = int(124 * scale)
             ratio = target_icon_w / icon_orig.width
             target_icon_h = int(icon_orig.height * ratio)
             icon_img = icon_orig.resize((target_icon_w, target_icon_h), Image.Resampling.LANCZOS)
         except Exception:
-            icon_img = Image.new("RGBA", (int(112 * scale), int(80 * scale)), (0, 113, 227, 255))
+            icon_img = Image.new("RGBA", (int(124 * scale), int(88 * scale)), (0, 113, 227, 255))
             target_icon_w, target_icon_h = icon_img.size
 
         center_x = W // 2
@@ -349,7 +350,7 @@ class WifiKioskApp:
         max_r = int(min(W, H) * glow_scale)
         rad_img = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
         rad_draw = ImageDraw.Draw(rad_img)
-        glow_alpha = 24 if not has_network else 28
+        glow_alpha = 24 if not has_network else 30
         for r in range(256, 0, -2):
             alpha = int(glow_alpha * (1.0 - r / 256.0))
             rad_draw.ellipse([256 - r, 256 - r, 256 + r, 256 + r], fill=(24, 42, 78, alpha))
@@ -367,7 +368,7 @@ class WifiKioskApp:
         val_txt = self.monitor_name if self.monitor_name else "AirPlay Display"
         b_lbl = draw.textbbox((0, 0), lbl_txt, font=font_label)
         b_val = draw.textbbox((0, 0), val_txt, font=font_name)
-        pad_x, pad_y = int(24 * scale), int(12 * scale)
+        pad_x, pad_y = int(26 * scale), int(13 * scale)
         pill_w = (b_lbl[2] - b_lbl[0]) + (b_val[2] - b_val[0]) + pad_x * 2
         pill_h = max(b_lbl[3] - b_lbl[1], b_val[3] - b_val[1]) + pad_y * 2
 
@@ -402,7 +403,7 @@ class WifiKioskApp:
             inst2 = f"Chọn \"{val_txt}\" để kết nối"
             b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
             b_i2 = draw.textbbox((0, 0), inst2, font=font_inst2)
-            inst_h = (b_i1[3] - b_i1[1]) + int(8 * scale) + (b_i2[3] - b_i2[1])
+            inst_h = (b_i1[3] - b_i1[1]) + int(10 * scale) + (b_i2[3] - b_i2[1])
 
             if getattr(self, "manual_wifi_open", False):
                 hint_txt = "Nhấn phím [Esc] trên bàn phím để đóng cài đặt Wi-Fi"
@@ -418,9 +419,9 @@ class WifiKioskApp:
                 hint_h = 0
                 gap_hint = 0
 
-            total_h = (target_icon_h + int(20 * scale) + title_h + int(24 * scale) + pill_h +
-                       int(24 * scale) + stat_h + (gap_stat_net + net_h if has_net_line else 0) +
-                       int(22 * scale) + inst_h + (gap_hint + hint_h if has_hint else 0))
+            total_h = (target_icon_h + int(22 * scale) + title_h + int(26 * scale) + pill_h +
+                       int(26 * scale) + stat_h + (gap_stat_net + net_h if has_net_line else 0) +
+                       int(26 * scale) + inst_h + (gap_hint + hint_h if has_hint else 0))
         else:
             stat_text = "● Chưa có kết nối mạng"
             stat_color = "#ff9f0a"
@@ -431,28 +432,28 @@ class WifiKioskApp:
             inst2 = "Dùng phím ↑ ↓ và Enter trên bàn phím để kết nối"
             b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
             b_i2 = draw.textbbox((0, 0), inst2, font=font_inst2)
-            inst_h = (b_i1[3] - b_i1[1]) + int(8 * scale) + (b_i2[3] - b_i2[1])
+            inst_h = (b_i1[3] - b_i1[1]) + int(10 * scale) + (b_i2[3] - b_i2[1])
 
-            total_h = (target_icon_h + int(20 * scale) + title_h + int(24 * scale) + pill_h +
-                       int(24 * scale) + stat_h + int(22 * scale) + inst_h)
+            total_h = (target_icon_h + int(22 * scale) + title_h + int(26 * scale) + pill_h +
+                       int(26 * scale) + stat_h + int(26 * scale) + inst_h)
 
         current_y = (H - total_h) // 2
 
         # Draw Icon
         img.paste(icon_img, (center_x - target_icon_w // 2, current_y), icon_img)
-        current_y += target_icon_h + int(20 * scale)
+        current_y += target_icon_h + int(22 * scale)
 
         # Draw Title
-        draw.text((center_x - (b_title[2] - b_title[0]) // 2, current_y), t_title, fill="#f5f5f7", font=font_title)
-        current_y += title_h + int(24 * scale)
+        draw.text((center_x - (b_title[2] - b_title[0]) // 2, current_y), t_title, fill="#ffffff", font=font_title)
+        current_y += title_h + int(26 * scale)
 
         # Draw Device Name Pill
         pill_x = center_x - pill_w // 2
         draw.rounded_rectangle([pill_x, current_y, pill_x + pill_w, current_y + pill_h],
-                               radius=int(14 * scale), fill="#1c1c1e", outline="#323236", width=int(1.2 * scale))
-        draw.text((pill_x + pad_x, current_y + pad_y), lbl_txt, fill="#86868b", font=font_label)
+                               radius=int(16 * scale), fill="#1c1c1e", outline="#3a3a3c", width=int(1.5 * scale))
+        draw.text((pill_x + pad_x, current_y + pad_y), lbl_txt, fill="#aeaeb2", font=font_label)
         draw.text((pill_x + pad_x + (b_lbl[2] - b_lbl[0]), current_y + pad_y), val_txt, fill="#ffffff", font=font_name)
-        current_y += pill_h + int(24 * scale)
+        current_y += pill_h + int(26 * scale)
 
         # Draw Status
         draw.text((center_x - (b_stat[2] - b_stat[0]) // 2, current_y), stat_text, fill=stat_color, font=font_status)
@@ -461,21 +462,21 @@ class WifiKioskApp:
         # Draw Network Info or Spacing
         if has_network and has_net_line:
             current_y += gap_stat_net
-            draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill="#5e5e62", font=font_status)
-            current_y += net_h + int(22 * scale)
+            draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill="#aeaeb2", font=font_status)
+            current_y += net_h + int(26 * scale)
         else:
-            current_y += int(22 * scale)
+            current_y += int(26 * scale)
 
         # Draw Instructions
-        draw.text((center_x - (b_i1[2] - b_i1[0]) // 2, current_y), inst1, fill="#86868b", font=font_inst1)
-        current_y += (b_i1[3] - b_i1[1]) + int(8 * scale)
-        draw.text((center_x - (b_i2[2] - b_i2[0]) // 2, current_y), inst2, fill="#5e5e62", font=font_inst2)
+        draw.text((center_x - (b_i1[2] - b_i1[0]) // 2, current_y), inst1, fill="#f5f5f7", font=font_inst1)
+        current_y += (b_i1[3] - b_i1[1]) + int(10 * scale)
+        draw.text((center_x - (b_i2[2] - b_i2[0]) // 2, current_y), inst2, fill="#aeaeb2", font=font_inst2)
         current_y += (b_i2[3] - b_i2[1])
 
         # Draw Subtle Key Hint if present
         if has_network and has_hint:
             current_y += gap_hint
-            draw.text((center_x - (b_h[2] - b_h[0]) // 2, current_y), hint_txt, fill="#3a3a3c", font=font_hint)
+            draw.text((center_x - (b_h[2] - b_h[0]) // 2, current_y), hint_txt, fill="#86868b", font=font_hint)
 
         return img
 

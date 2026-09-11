@@ -367,12 +367,12 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
                     pass
         return ImageFont.load_default()
 
-    font_title  = get_font("SFProDisplay-Bold.ttf", int(42 * scale))
-    font_label  = get_font("SFProText-Medium.ttf", int(17 * scale))
-    font_name   = get_font("SFProDisplay-Bold.ttf", int(20 * scale))
-    font_status = get_font("SFProText-Medium.ttf", int(15 * scale))
-    font_inst1  = get_font("SFProText-Regular.ttf", int(15 * scale))
-    font_inst2  = get_font("SFProText-Regular.ttf", int(14 * scale))
+    font_title  = get_font("SFProDisplay-Heavy.ttf", int(50 * scale))
+    font_label  = get_font("SFProText-Semibold.ttf", int(17 * scale))
+    font_name   = get_font("SFProDisplay-Bold.ttf", int(21 * scale))
+    font_status = get_font("SFProText-Semibold.ttf", int(17 * scale))
+    font_inst1  = get_font("SFProText-Medium.ttf", int(17 * scale))
+    font_inst2  = get_font("SFProText-Medium.ttf", int(16 * scale))
 
     # Apple AirPlay SF Symbol Icon
     def get_asset(filename):
@@ -407,7 +407,7 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     max_r = int(min(W, H) * glow_scale)
     rad_img = Image.new('RGBA', (512, 512), (0, 0, 0, 0))
     rad_draw = ImageDraw.Draw(rad_img)
-    glow_alpha = 24 if wifi_gui_showing else 28
+    glow_alpha = 24 if wifi_gui_showing else 30
     for r in range(256, 0, -2):
         alpha = int(glow_alpha * (1.0 - r / 256.0))
         rad_draw.ellipse([256 - r, 256 - r, 256 + r, 256 + r], fill=(24, 42, 78, alpha))
@@ -416,7 +416,7 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     img.paste(rad_scaled, (center_x - max_r, glow_y - max_r), rad_scaled)
 
     # 2. Dimensions calculation
-    target_icon_w = int((108 if wifi_gui_showing else 120) * scale)
+    target_icon_w = int((116 if wifi_gui_showing else 128) * scale)
     ratio = target_icon_w / icon_orig.width
     target_icon_h = int(icon_orig.height * ratio)
     icon_img = icon_orig.resize((target_icon_w, target_icon_h), Image.Resampling.LANCZOS)
@@ -431,11 +431,11 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     val_txt = monitor_name
     b_lbl = draw.textbbox((0, 0), lbl_txt, font=font_label)
     b_val = draw.textbbox((0, 0), val_txt, font=font_name)
-    pad_x, pad_y = int(24 * scale), int(12 * scale)
+    pad_x, pad_y = int(26 * scale), int(13 * scale)
     pill_w = (b_lbl[2] - b_lbl[0]) + (b_val[2] - b_val[0]) + pad_x * 2
     pill_h = max(b_lbl[3] - b_lbl[1], b_val[3] - b_val[1]) + pad_y * 2
 
-    gap_pill_stat = int(24 * scale)
+    gap_pill_stat = int((24 if wifi_gui_showing else 26) * scale)
 
     if has_network:
         stat_color = '#30d158'
@@ -469,7 +469,7 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
         inst2 = f'Chọn "{monitor_name}" để kết nối'
         b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
         b_i2 = draw.textbbox((0, 0), inst2, font=font_inst2)
-        inst_h = (b_i1[3] - b_i1[1]) + int(8 * scale) + (b_i2[3] - b_i2[1])
+        inst_h = (b_i1[3] - b_i1[1]) + int(10 * scale) + (b_i2[3] - b_i2[1])
 
         total_h = (target_icon_h + gap_icon_title + title_h + gap_title_pill +
                    pill_h + gap_pill_stat + stat_h + (gap_stat_net + net_h if has_net_line else 0) +
@@ -485,7 +485,7 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
         inst2 = "Dùng phím ↑ ↓ và Enter trên bàn phím"
         b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
         b_i2 = draw.textbbox((0, 0), inst2, font=font_inst2)
-        inst_h = (b_i1[3] - b_i1[1]) + int(8 * scale) + (b_i2[3] - b_i2[1])
+        inst_h = (b_i1[3] - b_i1[1]) + int(10 * scale) + (b_i2[3] - b_i2[1])
 
         total_h = (target_icon_h + gap_icon_title + title_h + gap_title_pill +
                    pill_h + gap_pill_stat + stat_h + gap_stat_inst + inst_h)
@@ -498,14 +498,14 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     current_y += target_icon_h + gap_icon_title
 
     # Draw Title
-    draw.text((center_x - (b_title[2] - b_title[0]) // 2, current_y), t_title, fill='#f5f5f7', font=font_title)
+    draw.text((center_x - (b_title[2] - b_title[0]) // 2, current_y), t_title, fill='#ffffff', font=font_title)
     current_y += title_h + gap_title_pill
 
     # Draw Device Pill Badge
     pill_x = center_x - pill_w // 2
     draw.rounded_rectangle([pill_x, current_y, pill_x + pill_w, current_y + pill_h],
-                           radius=int(14 * scale), fill='#1c1c1e', outline='#323236', width=int(1.2 * scale))
-    draw.text((pill_x + pad_x, current_y + pad_y), lbl_txt, fill='#86868b', font=font_label)
+                           radius=int(16 * scale), fill='#1c1c1e', outline='#3a3a3c', width=int(1.5 * scale))
+    draw.text((pill_x + pad_x, current_y + pad_y), lbl_txt, fill='#aeaeb2', font=font_label)
     draw.text((pill_x + pad_x + (b_lbl[2] - b_lbl[0]), current_y + pad_y), val_txt, fill='#ffffff', font=font_name)
     current_y += pill_h + gap_pill_stat
 
@@ -516,7 +516,7 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     # Draw Network Status if available
     if has_network and has_net_line:
         current_y += gap_stat_net
-        draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill='#5e5e62', font=font_status)
+        draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill='#aeaeb2', font=font_status)
         current_y += net_h + gap_net_inst
     elif has_network:
         current_y += gap_net_inst
@@ -524,8 +524,8 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
         current_y += gap_stat_inst
 
     # Draw Step Instructions
-    draw.text((center_x - (b_i1[2] - b_i1[0]) // 2, current_y), inst1, fill='#86868b', font=font_inst1)
-    draw.text((center_x - (b_i2[2] - b_i2[0]) // 2, current_y + (b_i1[3] - b_i1[1]) + int(8 * scale)), inst2, fill='#5e5e62', font=font_inst2)
+    draw.text((center_x - (b_i1[2] - b_i1[0]) // 2, current_y), inst1, fill='#f5f5f7', font=font_inst1)
+    draw.text((center_x - (b_i2[2] - b_i2[0]) // 2, current_y + (b_i1[3] - b_i1[1]) + int(10 * scale)), inst2, fill='#aeaeb2', font=font_inst2)
 
     # Downsample from 2x using Lanczos filter for razor-sharp Retina output
     final_img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
