@@ -261,6 +261,7 @@ install_dependencies() {
         gstreamer1.0-tools
         gstreamer1.0-vaapi
         va-driver-all
+        v4l-utils
         fontconfig
         pulseaudio
     )
