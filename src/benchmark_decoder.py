@@ -2,8 +2,9 @@
 # ==============================================================================
 # WysePlay - Hardware & Video Decoder Benchmark Utility
 # Tests from 4K down to 720p, targeting 60 FPS for ultra-smooth AirPlay.
-# Features automatic Hardware VPU (Cedrus/V4L2/VA-API) activation & evaluation,
-# comparing FPS, CPU load, and temperature to select the optimal configuration.
+# Features platform-aware Hardware VPU activation (Allwinner/Rockchip/Amlogic only),
+# preserving standard VA-API on Intel/AMD to avoid driver conflicts, and comparing
+# live CPU/GPU load and temperature to select the optimal configuration.
 # ==============================================================================
 
 import os
@@ -44,6 +45,87 @@ def log_warn(msg):
 
 def log_error(msg):
     print(f"{C_RED}✖  {msg}{C_RESET}", file=sys.stderr)
+
+# ==============================================================================
+# PLATFORM & SOC VENDOR DETECTION (PREVENTS CONFLICTS BETWEEN ARM & INTEL/AMD)
+# ==============================================================================
+
+def detect_soc_platform():
+    """
+    Detects hardware platform and SoC vendor:
+    Returns: 'intel', 'amd', 'allwinner', 'rockchip', 'amlogic', 'raspberrypi', 'x86_generic', or 'generic_arm'
+    """
+    arch = os.uname().machine.lower()
+
+    # 1. x86 / x86_64 architectures (Intel / AMD PCs & Thin Clients)
+    if arch in ('x86_64', 'amd64', 'i386', 'i686'):
+        cpu_info = ""
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                cpu_info = f.read().lower()
+        except Exception:
+            pass
+        if "intel" in cpu_info or "genuineintel" in cpu_info:
+            return "intel"
+        elif "amd" in cpu_info or "authenticamd" in cpu_info:
+            return "amd"
+        return "x86_generic"
+
+    # 2. Check Device Tree compatible string (Primary method for ARM Linux SoCs)
+    dt_compat = ""
+    for dt_path in ("/proc/device-tree/compatible", "/sys/firmware/devicetree/base/compatible"):
+        if os.path.isfile(dt_path):
+            try:
+                with open(dt_path, "rb") as f:
+                    dt_compat = f.read().decode('ascii', errors='ignore').lower()
+                    if dt_compat:
+                        break
+            except Exception:
+                pass
+
+    if dt_compat:
+        if any(k in dt_compat for k in ("allwinner", "sunxi", "sun50i", "sun8i", "sun4i")):
+            return "allwinner"
+        if any(k in dt_compat for k in ("rockchip", "rk33", "rk35", "rk32")):
+            return "rockchip"
+        if any(k in dt_compat for k in ("amlogic", "meson", "gxbb", "gxl", "g12a", "sm1")):
+            return "amlogic"
+        if any(k in dt_compat for k in ("raspberrypi", "bcm2835", "bcm2711", "bcm2712")):
+            return "raspberrypi"
+
+    # 3. Check /proc/cpuinfo Hardware / Model fields
+    try:
+        with open("/proc/cpuinfo", "r") as f:
+            for line in f:
+                line_lower = line.lower()
+                if "hardware" in line_lower or "model" in line_lower:
+                    if any(k in line_lower for k in ("allwinner", "sunxi", "h313", "h616", "h6", "h3")):
+                        return "allwinner"
+                    if any(k in line_lower for k in ("rockchip", "rk33", "rk35")):
+                        return "rockchip"
+                    if any(k in line_lower for k in ("amlogic", "meson", "s905")):
+                        return "amlogic"
+                    if any(k in line_lower for k in ("raspberry pi", "bcm283")):
+                        return "raspberrypi"
+    except Exception:
+        pass
+
+    # 4. Check sysfs SoC device
+    soc_paths = glob.glob("/sys/devices/soc0/*") + glob.glob("/sys/bus/soc/devices/soc0/*")
+    for sp in soc_paths:
+        try:
+            with open(sp, "r") as f:
+                c = f.read().lower()
+                if "allwinner" in c or "sunxi" in c:
+                    return "allwinner"
+                if "rockchip" in c:
+                    return "rockchip"
+                if "amlogic" in c:
+                    return "amlogic"
+        except Exception:
+            pass
+
+    return "generic_arm" if ("arm" in arch or "aarch64" in arch) else "generic"
 
 # ==============================================================================
 # HARDWARE & TELEMETRY MONITORING (CPU, TEMP, GPU)
@@ -203,7 +285,7 @@ class TelemetryTracker:
         if self._thread:
             self._thread.join(timeout=1.0)
         self.cpu_total_1, self.cpu_idle_1 = read_cpu_stat()
-        
+
         t_final = get_system_temp()
         if t_final is not None:
             if self.temp_peak is None or t_final > self.temp_peak:
@@ -268,32 +350,68 @@ def generate_fallback_clip(res, out_path, codec="h264", num_frames=120):
     return None
 
 # ==============================================================================
-# HARDWARE VPU (CEDRUS / V4L2 / VA-API) ACTIVATION & PROBING
+# TARGETED VPU HARDWARE ACTIVATION (CONDITIONAL ON PLATFORM)
 # ==============================================================================
 
-def try_activate_hardware_vpu():
+def try_activate_hardware_vpu(soc_platform):
     """
-    Attempts to enable hardware VPU kernel drivers (Cedrus, V4L2 M2M, VA-API, etc.)
-    and discovers functional GStreamer hardware decoders.
+    Conditionally activates hardware VPU ONLY when an ARM SoC (Allwinner, Rockchip, Amlogic)
+    is explicitly detected, preventing any conflicts or spurious module loads on Intel, AMD,
+    or generic platforms.
     """
-    log_info("Đang kiểm tra và kích hoạt VPU phần cứng (Cedrus/V4L2/VA-API)...")
-    modules = [
-        "cedrus",          # Allwinner H313, H616, H6, H3, A64 VPU
-        "sunxi_cedrus",    # Allwinner alternative naming
-        "v4l2_mem2mem",    # V4L2 M2M subsystem
-        "videodev",
-        "rkvdec",          # Rockchip VPU (RK3328, RK3399, RK3566, RK3588)
-        "hantro_vpu",      # Hantro VPU
-        "meson_vdec"       # Amlogic VPU (S905X, S905W, etc.)
-    ]
+    discovered = {"h264": [], "h265": []}
 
-    for mod in modules:
+    # 1. Intel / AMD / PC: Use native VA-API, NEVER touch ARM SoC VPU modules!
+    if soc_platform in ("intel", "amd", "x86_generic"):
+        log_info(f"Nền tảng {soc_platform.upper()} (x86/x64): Kích hoạt VA-API chuẩn (Intel/AMD), bỏ qua các driver VPU của ARM SoC để tránh xung đột.")
+        va_candidates = {
+            "h264": ['vaapih264dec'],
+            "h265": ['vaapih265dec']
+        }
+        for codec, candidates in va_candidates.items():
+            for cand in candidates:
+                try:
+                    ret = subprocess.run(['gst-inspect-1.0', cand], capture_output=True, timeout=5)
+                    if ret.returncode == 0:
+                        discovered.setdefault(codec, []).append(cand)
+                except Exception:
+                    pass
+        return discovered
+
+    # 2. Non-SoC ARM platforms (e.g. generic VM, server): Skip ARM VPU
+    if soc_platform not in ("allwinner", "rockchip", "amlogic"):
+        log_info(f"Nền tảng phần cứng ({soc_platform}): Không thuộc nhóm SoC nhúng ARM (Allwinner/Rockchip/Amlogic), bỏ qua kích hoạt VPU nhúng.")
+        return discovered
+
+    # 3. Targeted ARM SoC VPU Driver Loading
+    log_info(f"Phát hiện SoC nhúng {soc_platform.upper()}: Bắt đầu kích hoạt VPU phần cứng tương thích...")
+
+    modules_to_load = ["v4l2_mem2mem", "videodev"]
+    hw_candidates = {"h264": [], "h265": []}
+
+    if soc_platform == "allwinner":
+        # Allwinner Cedrus (H313, H616, H6, H3, A64)
+        modules_to_load.extend(["cedrus", "sunxi_cedrus"])
+        hw_candidates["h264"] = ['v4l2slh264dec', 'v4l2h264dec']
+        hw_candidates["h265"] = ['v4l2slh265dec', 'v4l2h265dec']
+    elif soc_platform == "rockchip":
+        # Rockchip MPP / RKVDEC (RK3328, RK3399, RK3566, RK3588)
+        modules_to_load.extend(["rkvdec", "hantro_vpu"])
+        hw_candidates["h264"] = ['v4l2slh264dec', 'v4l2h264dec']
+        hw_candidates["h265"] = ['v4l2slh265dec', 'v4l2h265dec']
+    elif soc_platform == "amlogic":
+        # Amlogic Meson VDEC (S905X, S905W)
+        modules_to_load.extend(["meson_vdec"])
+        hw_candidates["h264"] = ['v4l2h264dec']
+        hw_candidates["h265"] = ['v4l2h265dec']
+
+    for mod in modules_to_load:
         try:
             subprocess.run(["modprobe", mod], capture_output=True, timeout=3)
         except Exception:
             pass
 
-    # Check for V4L2 video devices in /dev
+    # Verify V4L2 video devices in /dev
     v4l2_devices = []
     if os.path.isdir("/dev"):
         for dev in os.listdir("/dev"):
@@ -301,15 +419,9 @@ def try_activate_hardware_vpu():
                 v4l2_devices.append(os.path.join("/dev", dev))
 
     if v4l2_devices:
-        log_info(f"Phát hiện {len(v4l2_devices)} cổng V4L2: {', '.join(v4l2_devices[:4])}")
+        log_info(f"Cổng VPU V4L2 khả dụng cho {soc_platform.upper()}: {', '.join(v4l2_devices[:4])}")
 
-    # Re-inspect candidate hardware decoders in GStreamer
-    hw_candidates = {
-        "h264": ['v4l2slh264dec', 'v4l2h264dec', 'vaapih264dec', 'nvh264dec'],
-        "h265": ['v4l2slh265dec', 'v4l2h265dec', 'vaapih265dec', 'nvh265dec']
-    }
-
-    discovered = {}
+    # Inspect GStreamer decoders for target SoC
     for codec, candidates in hw_candidates.items():
         for cand in candidates:
             try:
@@ -321,7 +433,7 @@ def try_activate_hardware_vpu():
 
     return discovered
 
-def detect_functional_decoders(test_clip_h264=None, test_clip_h265=None):
+def detect_functional_decoders(soc_platform, test_clip_h264=None, test_clip_h265=None):
     """
     Discovers all available software and hardware decoders on the system.
     """
@@ -332,7 +444,7 @@ def detect_functional_decoders(test_clip_h264=None, test_clip_h265=None):
         "hw_h265": []
     }
 
-    hw_map = try_activate_hardware_vpu()
+    hw_map = try_activate_hardware_vpu(soc_platform)
     decoders["hw_h264"] = hw_map.get("h264", [])
     decoders["hw_h265"] = hw_map.get("h265", [])
 
@@ -375,7 +487,7 @@ def run_decode_test(clip_path, decoder, parser="h264parse", num_frames=120, time
         return 0.0, telemetry, f"GStreamer pipeline error (code {proc.returncode})"
 
     output = proc.stdout + "\n" + proc.stderr
-    
+
     # 1. Look for fpsdisplaysink last-message: average: XXX.XX
     averages = re.findall(r'last-message\s*=\s*rendered:\s*(\d+),\s*dropped:\s*(\d+).*?average:\s*([0-9.]+)', output)
     if averages:
@@ -413,7 +525,7 @@ def print_telemetry_line(decoder_name, fps, telem, is_hw=False):
     if telem.get("temp_peak") is not None:
         delta = f"(+{telem['temp_delta']}°C)" if telem.get("temp_delta") is not None else ""
         temp_str = f" | Nhiệt độ: {telem['temp_peak']}°C {delta}"
-    
+
     gpu_str = ""
     if telem.get("gpu_peak") is not None:
         gpu_str = f" | GPU: {telem['gpu_peak']}%"
@@ -424,7 +536,7 @@ def print_telemetry_line(decoder_name, fps, telem, is_hw=False):
 # RESOLUTION TIER TESTER WITH VPU AUTO-EVALUATION
 # ==============================================================================
 
-def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="avdec_h264", hw_decoders=None):
+def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="avdec_h264", hw_decoders=None, soc_platform="generic"):
     """
     Tests resolution tier with default decoder. If default decoder does not reach 60fps,
     or if hardware VPU decoders are available, benchmarks hardware VPU decoders as well,
@@ -436,7 +548,7 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
     # Phase 1: Test with standard/default decoder
     print(f"      [1] Thử nghiệm bộ giải mã mặc định/CPU ({C_CYAN}{default_dec}{C_RESET})...")
     fps_def, telem_def, err_def = run_decode_test(clip_path, default_dec, parser=parser)
-    
+
     passed_60_def = fps_def >= 58.0
     passed_30_def = fps_def >= 28.0
 
@@ -446,26 +558,30 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
     best_fps = fps_def
     best_telem = telem_def
     best_is_hw = False
-    
+
     # Phase 2: If default decoder fails 60 FPS OR if hardware decoders exist, try VPU hardware acceleration!
     tested_hw = []
-    
-    # Check if we should activate VPU
+
     if (not passed_60_def) or (hw_decoders and len(hw_decoders) > 0):
         if not hw_decoders:
-            log_info(f"Tốc độ giải mã mặc định ({fps_def:.1f} FPS) chưa đạt 60 FPS. Thử kích hoạt VPU phần cứng (Cedrus/V4L2/VA-API)...")
-            discovered_map = try_activate_hardware_vpu()
-            hw_decoders = discovered_map.get(codec, [])
-        
-        for hw_dec in hw_decoders:
+            if soc_platform in ("allwinner", "rockchip", "amlogic"):
+                log_info(f"Tốc độ CPU ({fps_def:.1f} FPS) chưa đạt 60 FPS. Thử kích hoạt VPU phần cứng cho {soc_platform.upper()}...")
+                discovered_map = try_activate_hardware_vpu(soc_platform)
+                hw_decoders = discovered_map.get(codec, [])
+            elif soc_platform in ("intel", "amd", "x86_generic"):
+                log_info(f"Tốc độ CPU ({fps_def:.1f} FPS) chưa đạt 60 FPS. Thử kiểm tra VA-API phần cứng...")
+                discovered_map = try_activate_hardware_vpu(soc_platform)
+                hw_decoders = discovered_map.get(codec, [])
+
+        for hw_dec in (hw_decoders or []):
             if hw_dec == default_dec:
                 continue
-            print(f"      [2] Thử nghiệm tăng tốc VPU phần cứng ({C_GREEN}{hw_dec}{C_RESET})...")
+            print(f"      [2] Thử nghiệm tăng tốc phần cứng ({C_GREEN}{hw_dec}{C_RESET})...")
             fps_hw, telem_hw, err_hw = run_decode_test(clip_path, hw_dec, parser=parser)
             if err_hw:
-                log_warn(f"          ↳ VPU {hw_dec} không thể giải mã mẫu này: {err_hw}")
+                log_warn(f"          ↳ Bộ giải mã {hw_dec} không thể giải mã mẫu này: {err_hw}")
                 continue
-            
+
             print_telemetry_line(hw_dec, fps_hw, telem_hw, is_hw=True)
             tested_hw.append({
                 "decoder": hw_dec,
@@ -474,14 +590,12 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
             })
 
             # Compare and evaluate:
-            # Criteria 1: HW passes 60 FPS while default did not -> HW wins!
             if fps_hw >= 58.0 and not passed_60_def:
                 best_decoder = hw_dec
                 best_fps = fps_hw
                 best_telem = telem_hw
                 best_is_hw = True
-                log_success(f"          ↳ VPU phần cứng ({hw_dec}) đã nâng tốc độ lên {fps_hw:.1f} FPS (Đạt chuẩn 60 FPS)!")
-            # Criteria 2: Both pass 60 FPS -> Compare CPU % and Temp!
+                log_success(f"          ↳ Phần cứng ({hw_dec}) đã nâng tốc độ lên {fps_hw:.1f} FPS (Đạt chuẩn 60 FPS)!")
             elif fps_hw >= 58.0 and passed_60_def:
                 cpu_saved = telem_def["cpu_avg"] - telem_hw["cpu_avg"]
                 if cpu_saved > 10.0 or (telem_hw.get("temp_peak") and telem_def.get("temp_peak") and telem_hw["temp_peak"] < telem_def["temp_peak"]):
@@ -489,8 +603,7 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
                     best_fps = fps_hw
                     best_telem = telem_hw
                     best_is_hw = True
-                    log_success(f"          ↳ Cả 2 đều đạt 60 FPS nhưng VPU ({hw_dec}) giảm tải CPU {cpu_saved:.1f}% và nhiệt độ mát hơn. Chọn VPU!")
-            # Criteria 3: Neither passes 60 FPS -> Pick whichever is faster & cooler
+                    log_success(f"          ↳ Cả 2 đều đạt 60 FPS nhưng phần cứng ({hw_dec}) giảm tải CPU {cpu_saved:.1f}% và nhiệt độ mát hơn. Chọn phần cứng!")
             elif (not passed_60_def) and (fps_hw > best_fps or (fps_hw >= 28.0 and telem_hw["cpu_avg"] < best_telem["cpu_avg"])):
                 best_decoder = hw_dec
                 best_fps = fps_hw
@@ -528,15 +641,18 @@ def benchmark_hardware():
     telemetry comparison (CPU usage, temperature, GPU) between Software & Hardware VPU.
     """
     cpu = get_cpu_info()
+    soc_platform = detect_soc_platform()
+
     print(f"\n{C_BOLD}======================================================================{C_RESET}")
     print(f"{C_BOLD}  ⚡ WYSEPLAY DECODER PERFORMANCE BENCHMARK (4K -> 1080p -> 720p){C_RESET}")
     print(f"{C_BOLD}======================================================================{C_RESET}")
     print(f"  • CPU Model:        {C_CYAN}{cpu['model']}{C_RESET}")
     print(f"  • Kiến trúc / Cores: {C_CYAN}{cpu['arch']} ({cpu['cores']} cores){C_RESET}")
+    print(f"  • Nền tảng SoC:     {C_CYAN}{soc_platform.upper()}{C_RESET}")
 
     if not shutil.which('gst-launch-1.0'):
         log_warn("Không tìm thấy công cụ GStreamer (gst-launch-1.0). Sử dụng hồ sơ ước tính theo phần cứng CPU...")
-        return fallback_profile(cpu)
+        return fallback_profile(cpu, soc_platform)
 
     # 1. Resolve benchmark clips
     clip_4k = locate_benchmark_file("bench_4k.h265")
@@ -554,17 +670,17 @@ def benchmark_hardware():
 
     if not clip_720p and not clip_1080p and not clip_4k:
         log_warn("Không thể tạo tệp kiểm thử video. Sử dụng ước lượng thông số dựa trên CPU...")
-        return fallback_profile(cpu)
+        return fallback_profile(cpu, soc_platform)
 
     # 2. Discover available decoders
-    decoders = detect_functional_decoders(clip_1080p or clip_720p, clip_4k)
+    decoders = detect_functional_decoders(soc_platform, clip_1080p or clip_720p, clip_4k)
     hw_h264 = decoders["hw_h264"]
     hw_h265 = decoders["hw_h265"]
 
     if hw_h264 or hw_h265:
-        log_success(f"Phát hiện VPU/GPU tăng tốc phần cứng: H.264 ({', '.join(hw_h264) or 'None'}), H.265 ({', '.join(hw_h265) or 'None'})")
+        log_success(f"Phát hiện tăng tốc phần cứng ({soc_platform.upper()}): H.264 ({', '.join(hw_h264) or 'None'}), H.265 ({', '.join(hw_h265) or 'None'})")
     else:
-        log_info("Chưa phát hiện VPU phần cứng sẵn sàng. Sẽ đo kiểm CPU trước và tự kích hoạt VPU nếu cần.")
+        log_info("Chưa phát hiện tăng tốc phần cứng sẵn sàng. Sẽ đo kiểm CPU trước và tự kích hoạt nếu cần.")
 
     # 3. Execute Benchmarks from 4K down
     results = {}
@@ -574,7 +690,7 @@ def benchmark_hardware():
         default_4k_dec = hw_h265[0] if hw_h265 else decoders["sw_h265"]
         results["4k"] = test_resolution_tier(
             "4k", "4K UHD (3840x2160, H.265)", clip_4k,
-            codec="h265", default_dec=default_4k_dec, hw_decoders=hw_h265
+            codec="h265", default_dec=default_4k_dec, hw_decoders=hw_h265, soc_platform=soc_platform
         )
 
     # Benchmark 1080p (1920x1080, H.264)
@@ -582,7 +698,7 @@ def benchmark_hardware():
         default_1080_dec = decoders["sw_h264"]
         results["1080p"] = test_resolution_tier(
             "1080p", "1080p Full HD (1920x1080, H.264)", clip_1080p,
-            codec="h264", default_dec=default_1080_dec, hw_decoders=hw_h264
+            codec="h264", default_dec=default_1080_dec, hw_decoders=hw_h264, soc_platform=soc_platform
         )
 
     # Benchmark 720p (1280x720, H.264)
@@ -590,17 +706,17 @@ def benchmark_hardware():
         default_720_dec = decoders["sw_h264"]
         results["720p"] = test_resolution_tier(
             "720p", "720p HD Ready (1280x720, H.264)", clip_720p,
-            codec="h264", default_dec=default_720_dec, hw_decoders=hw_h264
+            codec="h264", default_dec=default_720_dec, hw_decoders=hw_h264, soc_platform=soc_platform
         )
 
-    # 4. Profile Decision Logic (Goal: Max 60 FPS, Thermally Safe, Hardware VPU Prioritized)
+    # 4. Profile Decision Logic (Goal: Max 60 FPS, Thermally Safe, Hardware Prioritized)
     p4k = results.get("4k", {"passed_60": False, "passed_30": False, "fps": 0.0, "decoder": decoders["sw_h265"], "telemetry": {}, "is_hw": False})
     p1080 = results.get("1080p", {"passed_60": False, "passed_30": False, "fps": 0.0, "decoder": decoders["sw_h264"], "telemetry": {}, "is_hw": False})
     p720 = results.get("720p", {"passed_60": False, "passed_30": False, "fps": 0.0, "decoder": decoders["sw_h264"], "telemetry": {}, "is_hw": False})
 
     # Decision tree:
     if p4k["passed_60"] and not p4k.get("thermal_warning"):
-        hw_tag = " [VPU Phần cứng]" if p4k["is_hw"] else " [CPU]"
+        hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p4k["is_hw"] else " [CPU]"
         selected = {
             "resolution": "3840x2160",
             "width": 3840,
@@ -612,7 +728,7 @@ def benchmark_hardware():
         }
         chosen_decoder = p4k["decoder"]
     elif p1080["passed_60"] and not p1080.get("thermal_warning"):
-        hw_tag = " [VPU Phần cứng]" if p1080["is_hw"] else " [CPU]"
+        hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p1080["is_hw"] else " [CPU]"
         selected = {
             "resolution": "1920x1080",
             "width": 1920,
@@ -624,7 +740,7 @@ def benchmark_hardware():
         }
         chosen_decoder = p1080["decoder"]
     elif p720["passed_60"]:
-        hw_tag = " [VPU Phần cứng]" if p720["is_hw"] else " [CPU]"
+        hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p720["is_hw"] else " [CPU]"
         thermal_note = " (1080p bị cảnh báo quá tải/quá nhiệt)" if p1080.get("thermal_warning") else ""
         selected = {
             "resolution": "1280x720",
@@ -684,6 +800,7 @@ def benchmark_hardware():
     profile_data = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "cpu": cpu,
+        "soc_platform": soc_platform,
         "decoder": chosen_decoder,
         "video_sink": "autovideosink",
         "benchmarks": results,
@@ -692,12 +809,12 @@ def benchmark_hardware():
 
     return profile_data
 
-def fallback_profile(cpu):
+def fallback_profile(cpu, soc_platform="generic"):
     """Fallback profile based purely on core count if benchmark files unavailable."""
     if cpu["cores"] >= 8:
         res, fps, h265 = "3840x2160", 60, True
         tier = "4K Ultra HD @ 60 FPS"
-    elif cpu["cores"] >= 4 and cpu["arch"] in ("x86_64", "amd64"):
+    elif cpu["cores"] >= 4 and soc_platform in ("intel", "amd", "x86_generic"):
         res, fps, h265 = "1920x1080", 60, False
         tier = "Full HD @ 60 FPS"
     elif cpu["cores"] >= 4:
@@ -711,6 +828,7 @@ def fallback_profile(cpu):
     return {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "cpu": cpu,
+        "soc_platform": soc_platform,
         "decoder": "avdec_h265" if h265 else "avdec_h264",
         "video_sink": "autovideosink",
         "benchmarks": {},
@@ -721,7 +839,7 @@ def fallback_profile(cpu):
             "max_fps": fps,
             "h265": h265,
             "tier": tier,
-            "reason": f"Ước lượng theo thông số {cpu['cores']} nhân ({cpu['arch']})."
+            "reason": f"Ước lượng theo thông số {cpu['cores']} nhân ({cpu['arch']}) trên nền tảng {soc_platform.upper()}."
         }
     }
 
@@ -737,9 +855,11 @@ def save_profile(profile_data, json_path=DEFAULT_CONFIG_PATH, etc_path=ETC_CONFI
 
     try:
         sp = profile_data["selected_profile"]
+        soc = profile_data.get("soc_platform", "generic")
         lines = [
             "# WysePlay Auto-Generated Hardware Profile",
             f"# Generated: {profile_data.get('timestamp')}",
+            f"WYSEPLAY_SOC_PLATFORM={soc}",
             f"WYSEPLAY_RESOLUTION={sp['resolution']}",
             f"WYSEPLAY_WIDTH={sp['width']}",
             f"WYSEPLAY_HEIGHT={sp['height']}",
@@ -760,10 +880,12 @@ def print_summary(profile_data):
     """Prints a styled verdict summary with telemetry details."""
     sp = profile_data["selected_profile"]
     dec = profile_data["decoder"]
+    soc = profile_data.get("soc_platform", "GENERIC").upper()
 
     print(f"\n{C_BOLD}----------------------------------------------------------------------{C_RESET}")
     print(f"{C_BOLD}{C_GREEN}  🎉 KẾT QUẢ TỐI ƯU HÓA CẤU HÌNH AIRPLAY (UXPLAY):{C_RESET}")
     print(f"{C_BOLD}----------------------------------------------------------------------{C_RESET}")
+    print(f"  • Nền tảng SoC:       {C_CYAN}{soc}{C_RESET}")
     print(f"  • Cấu hình lựa chọn:  {C_BOLD}{C_GREEN}{sp['tier']}{C_RESET}")
     print(f"  • Độ phân giải tối đa: {C_CYAN}{sp['resolution']}{C_RESET}")
     print(f"  • Tốc độ khung hình:   {C_CYAN}{sp['max_fps']} FPS{C_RESET}")
@@ -791,7 +913,7 @@ def print_summary(profile_data):
     print(f"{C_BOLD}----------------------------------------------------------------------{C_RESET}\n")
 
 def main():
-    parser = argparse.ArgumentParser(description="WysePlay Hardware Decoder Benchmark with VPU & Thermal Telemetry")
+    parser = argparse.ArgumentParser(description="WysePlay Hardware Decoder Benchmark with SoC-Aware VPU & Telemetry")
     parser.add_argument("--force", action="store_true", help="Force re-run benchmark even if config exists")
     parser.add_argument("--json", action="store_true", help="Output raw JSON only")
     parser.add_argument("--out", default=DEFAULT_CONFIG_PATH, help="Output path for JSON profile")
