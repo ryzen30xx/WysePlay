@@ -350,7 +350,7 @@ def main():
         target_res = "1920x1080"
         target_fps = 60
         target_h265 = False
-        decoder = "avdec_h264"
+        decoder = "v4l2slh264dec" if os.path.exists("/dev/video0") else "avdec_h264"
         video_sink = "autovideosink"
 
         if profile and "selected_profile" in profile:
