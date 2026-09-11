@@ -370,11 +370,11 @@ class WifiKioskApp:
         if has_network:
             stat_color = "#30d158"
             if self.net_type == "LAN":
-                stat_text = f"● Đang kết nối mạng LAN ({self.ip})" if (self.ip and self.ip != "127.0.0.1") else "● Đang kết nối mạng LAN"
+                stat_text = "● Đang kết nối mạng LAN"
                 net_text = ""
             else:
                 net_label = f"Wi-Fi: {self.ssid}" if self.ssid else "Wi-Fi"
-                stat_text = f"● Đang kết nối {net_label} ({self.ip})" if (self.ip and self.ip != "127.0.0.1") else f"● Đang kết nối {net_label}"
+                stat_text = f"● Đang kết nối {net_label}"
                 net_text = ""
             b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
             stat_h = b_stat[3] - b_stat[1]

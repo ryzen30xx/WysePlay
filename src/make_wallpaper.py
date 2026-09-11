@@ -242,11 +242,11 @@ def generate_wallpaper(wifi_gui_showing=None):
     if has_network:
         stat_color = '#30d158'
         if net_type == "LAN":
-            stat_text = f"● Đang kết nối mạng LAN ({ip})" if (ip and ip != "127.0.0.1") else "● Đang kết nối mạng LAN"
+            stat_text = "● Đang kết nối mạng LAN"
             net_text = ""
         else:
             net_label = f"Wi-Fi: {ssid}" if ssid else "Wi-Fi"
-            stat_text = f"● Đang kết nối {net_label} ({ip})" if (ip and ip != "127.0.0.1") else f"● Đang kết nối {net_label}"
+            stat_text = f"● Đang kết nối {net_label}"
             net_text = ""
         b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
         stat_h = b_stat[3] - b_stat[1]
