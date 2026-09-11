@@ -258,8 +258,8 @@ class WifiKioskApp:
         self.canvas_root = tk.Canvas(self.root, width=self.sw, height=self.sh, bg=self.COLOR_BG, highlightthickness=0)
         self.canvas_root.pack(fill=tk.BOTH, expand=True)
 
-        # Query initial network & display information
-        self.net_type, self.ip, self.ssid = make_wallpaper.check_network_status()
+        # Query initial network & display information with kernel synchronization
+        self.net_type, self.ip, self.ssid = make_wallpaper.check_network_status(wait_sync=True)
         _, _, self.monitor_name = make_wallpaper.get_display_info()
         has_net = (self.net_type != "NONE")
 
@@ -374,11 +374,17 @@ class WifiKioskApp:
         if has_network:
             stat_color = "#30d158"
             if self.net_type == "LAN":
-                stat_text = "● Đang kết nối mạng LAN"
+                if self.ip and self.ip != "127.0.0.1":
+                    stat_text = "● Đang kết nối mạng LAN"
+                else:
+                    stat_text = "● Đã cắm cáp LAN (Đang nhận IP...)"
                 net_text = ""
             else:
                 net_label = f"Wi-Fi: {self.ssid}" if self.ssid else "Wi-Fi"
-                stat_text = f"● Đang kết nối {net_label}"
+                if self.ip and self.ip != "127.0.0.1":
+                    stat_text = f"● Đang kết nối {net_label}"
+                else:
+                    stat_text = f"● Đã kết nối {net_label} (Đang nhận IP...)"
                 net_text = ""
             b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
             stat_h = b_stat[3] - b_stat[1]
@@ -709,7 +715,7 @@ class WifiKioskApp:
     def _network_poll_loop(self):
         """Monitors network connection changes and triggers smooth slide transitions."""
         try:
-            net_type, ip, ssid = make_wallpaper.check_network_status()
+            net_type, ip, ssid = make_wallpaper.check_network_status(wait_sync=False)
             _, _, monitor_name = make_wallpaper.get_display_info()
 
             monitor_changed = (monitor_name != self.monitor_name)
@@ -750,6 +756,15 @@ class WifiKioskApp:
                 elif (net_changed or info_changed or monitor_changed) and not self.is_animating:
                     # Update active connection display (e.g. DHCP IP assigned)
                     self.update_airplay_panel_image()
+
+            if net_changed or info_changed or monitor_changed:
+                try:
+                    make_wallpaper.generate_wallpaper(
+                        wifi_gui_showing=(self.current_state == "DISCONNECTED"),
+                        wait_sync=False
+                    )
+                except Exception:
+                    pass
         except Exception as e:
             print("[WifiKiosk] Poller error:", e)
 

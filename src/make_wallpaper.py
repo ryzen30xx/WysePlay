@@ -1,14 +1,20 @@
-import os, sys, glob, json, subprocess
+import os, sys, glob, json, subprocess, time, socket, struct
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
 from PIL import Image, ImageDraw, ImageFont
 
 def get_display_info():
     res = "1280x800"
     rate = 60
     monitor_name = "AirPlay Display"
+    disp = os.environ.get("DISPLAY", ":0")
 
     # 1. Parse xrandr for active resolution and refresh rate
     try:
-        out = subprocess.check_output("DISPLAY=:0 xrandr", shell=True).decode()
+        out = subprocess.check_output(f"DISPLAY={disp} xrandr", shell=True).decode()
         for line in out.splitlines():
             if ' connected' in line:
                 m = [p for p in line.split() if 'x' in p and '+' in p]
@@ -54,7 +60,7 @@ def get_display_info():
     # 3. Fallback: check xrandr --verbose for EDID
     if monitor_name == "AirPlay Display":
         try:
-            out = subprocess.check_output("DISPLAY=:0 xrandr --verbose", shell=True).decode()
+            out = subprocess.check_output(f"DISPLAY={disp} xrandr --verbose", shell=True).decode()
             lines = out.splitlines()
             for i, line in enumerate(lines):
                 if 'EDID:' in line:
@@ -81,7 +87,7 @@ def get_display_info():
     # 4. Fallback: use connected port name
     if monitor_name == "AirPlay Display":
         try:
-            out = subprocess.check_output("DISPLAY=:0 xrandr", shell=True).decode()
+            out = subprocess.check_output(f"DISPLAY={disp} xrandr", shell=True).decode()
             for line in out.splitlines():
                 if ' connected' in line:
                     port = line.split()[0]
@@ -92,37 +98,229 @@ def get_display_info():
 
     return res, rate, monitor_name
 
-def check_network_status():
-    """Returns (net_type, ip, extra_info) where net_type is LAN, WIFI, or NONE"""
-    if os.path.exists("/tmp/simulate_offline"):
-        return "NONE", "127.0.0.1", ""
-    net_type = "NONE"
-    ip = "127.0.0.1"
-    ssid = ""
-
+def get_kernel_interface_ip(iface):
+    """Reads IPv4 address directly from kernel socket via SIOCGIFADDR ioctl (<0.01ms)."""
+    if not HAS_FCNTL:
+        return None
     try:
-        out = subprocess.check_output("ip -j addr", shell=True).decode()
-        addrs = json.loads(out)
-        for iface in addrs:
-            name = iface.get("ifname", "")
-            for a in iface.get("addr_info", []):
-                if a.get("family") == "inet" and a.get("local") != "127.0.0.1":
-                    if name.startswith(("eth", "en")):
-                        return "LAN", a.get("local"), ""
-                    elif name.startswith(("wlan", "wl")):
-                        net_type = "WIFI"
-                        ip = a.get("local")
-        if net_type == "WIFI":
-            try:
-                s_out = subprocess.check_output("nmcli -t -f active,ssid dev wifi 2>/dev/null | grep ^yes", shell=True).decode()
-                parts = s_out.strip().split(":")
-                if len(parts) > 1:
-                    ssid = parts[1]
-            except Exception:
-                pass
-            return "WIFI", ip, ssid
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        addr = fcntl.ioctl(
+            s.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack('256s', iface[:15].encode('utf-8'))
+        )[20:24]
+        s.close()
+        ip = socket.inet_ntoa(addr)
+        if ip and ip != "127.0.0.1" and not ip.startswith("169.254."):
+            return ip
     except Exception:
         pass
+    return None
+
+def get_kernel_default_route_iface():
+    """Parses Linux kernel routing table (/proc/net/route) to locate default gateway interface."""
+    try:
+        with open("/proc/net/route", "r") as f:
+            for line in f.readlines()[1:]:
+                parts = line.strip().split()
+                if len(parts) >= 4 and parts[1] == "00000000":
+                    flags = int(parts[3], 16)
+                    if flags & 0x2:  # RTF_GATEWAY
+                        return parts[0]
+    except Exception:
+        pass
+    return None
+
+def probe_kernel_network_devices():
+    """
+    Directly queries Linux sysfs (/sys/class/net/*) for kernel-level link states:
+    - carrier (1=physical link detected by PHY, 0=unplugged/disconnected)
+    - operstate ('up', 'dormant', 'down', 'lowerlayerdown', 'unknown')
+    - flags (IFF_UP=0x1, IFF_RUNNING=0x40 indicates active operational hardware link)
+    - ARPHRD type & wireless extensions
+    """
+    devices = []
+    default_iface = get_kernel_default_route_iface()
+
+    for ifpath in sorted(glob.glob("/sys/class/net/*")):
+        iface = os.path.basename(ifpath)
+        if iface == "lo" or iface.startswith(("docker", "veth", "br-", "virbr", "tun", "tap")):
+            continue
+
+        carrier = 0
+        carrier_file = os.path.join(ifpath, "carrier")
+        if os.path.isfile(carrier_file):
+            try:
+                with open(carrier_file, "r") as f:
+                    carrier = int(f.read().strip())
+            except Exception:
+                carrier = 0
+
+        operstate = "unknown"
+        oper_file = os.path.join(ifpath, "operstate")
+        if os.path.isfile(oper_file):
+            try:
+                with open(oper_file, "r") as f:
+                    operstate = f.read().strip().lower()
+            except Exception:
+                pass
+
+        flags = 0
+        flags_file = os.path.join(ifpath, "flags")
+        if os.path.isfile(flags_file):
+            try:
+                with open(flags_file, "r") as f:
+                    flags = int(f.read().strip(), 16)
+            except Exception:
+                pass
+
+        is_running = bool(flags & 0x40) or (carrier == 1)
+
+        is_wireless = (
+            os.path.isdir(os.path.join(ifpath, "wireless")) or
+            os.path.isdir(os.path.join(ifpath, "phy80211")) or
+            iface.startswith(("wlan", "wl"))
+        )
+        iface_type = "WIFI" if is_wireless else "LAN"
+        ip = get_kernel_interface_ip(iface)
+
+        devices.append({
+            "iface": iface,
+            "type": iface_type,
+            "carrier": carrier,
+            "operstate": operstate,
+            "flags": flags,
+            "is_running": is_running,
+            "is_default": (iface == default_iface),
+            "ip": ip
+        })
+
+    return devices
+
+def get_active_wifi_ssid(iface=None):
+    """Retrieves active Wi-Fi SSID with timeout protection."""
+    if iface:
+        try:
+            out = subprocess.check_output(f"iw dev {iface} link 2>/dev/null", shell=True, timeout=1.0).decode()
+            for line in out.splitlines():
+                if "SSID:" in line:
+                    ssid = line.split("SSID:", 1)[1].strip()
+                    if ssid:
+                        return ssid
+        except Exception:
+            pass
+
+    try:
+        out = subprocess.check_output("nmcli -t -f active,ssid dev wifi 2>/dev/null | grep ^yes", shell=True, timeout=1.0).decode()
+        parts = out.strip().split(":")
+        if len(parts) > 1 and parts[1]:
+            return parts[1]
+    except Exception:
+        pass
+
+    return ""
+
+def check_network_status(wait_sync=False, max_wait=2.5):
+    """
+    Evaluates network connection at the Linux kernel level:
+    - Queries /sys/class/net/* for hardware carrier & operstate.
+    - Resolves IP via kernel SIOCGIFADDR ioctl (and ip -j addr fallback).
+    - If wait_sync=True and kernel detects an active physical link (e.g. Ethernet cable
+      plugged in or Wi-Fi associated) but DHCP has not yet finished assigning IP,
+      it waits up to max_wait (checking every 50ms) so the standby screen boots up
+      with the verified connected state immediately without flickering or wrong status.
+    Returns: (net_type, ip, extra_info)
+    """
+    if os.path.exists("/tmp/simulate_offline"):
+        return "NONE", "127.0.0.1", ""
+
+    devices = probe_kernel_network_devices()
+
+    lan_devs = [d for d in devices if d["type"] == "LAN" and (d["carrier"] == 1 or d["is_running"])]
+    wifi_devs = [d for d in devices if d["type"] == "WIFI" and (d["carrier"] == 1 or d["operstate"] == "up" or d["is_running"])]
+
+    # 1. Physical Ethernet (LAN) has absolute priority
+    if lan_devs:
+        lan_devs.sort(key=lambda d: 0 if d["is_default"] else 1)
+        target = lan_devs[0]
+        ip = target["ip"]
+
+        if (not ip) and wait_sync:
+            start_t = time.time()
+            while time.time() - start_t < max_wait:
+                time.sleep(0.05)
+                ip = get_kernel_interface_ip(target["iface"])
+                if ip:
+                    break
+
+        if not ip:
+            try:
+                out = subprocess.check_output("ip -j addr show " + target["iface"], shell=True, timeout=1.0).decode()
+                addrs = json.loads(out)
+                for item in addrs:
+                    for a in item.get("addr_info", []):
+                        if a.get("family") == "inet" and a.get("local") != "127.0.0.1":
+                            ip = a.get("local")
+                            break
+            except Exception:
+                pass
+
+        if ip:
+            return "LAN", ip, ""
+        else:
+            # Physical carrier exists: cable is connected, waiting for DHCP lease
+            return "LAN", "127.0.0.1", "Đang nhận IP..."
+
+    # 2. Wi-Fi connection
+    if wifi_devs:
+        wifi_devs.sort(key=lambda d: 0 if d["is_default"] else 1)
+        target = wifi_devs[0]
+        ip = target["ip"]
+
+        if (not ip) and wait_sync:
+            start_t = time.time()
+            while time.time() - start_t < max_wait:
+                time.sleep(0.05)
+                ip = get_kernel_interface_ip(target["iface"])
+                if ip:
+                    break
+
+        if not ip:
+            try:
+                out = subprocess.check_output("ip -j addr show " + target["iface"], shell=True, timeout=1.0).decode()
+                addrs = json.loads(out)
+                for item in addrs:
+                    for a in item.get("addr_info", []):
+                        if a.get("family") == "inet" and a.get("local") != "127.0.0.1":
+                            ip = a.get("local")
+                            break
+            except Exception:
+                pass
+
+        ssid = get_active_wifi_ssid(target["iface"])
+        if ip:
+            return "WIFI", ip, ssid
+        else:
+            return "WIFI", "127.0.0.1", ssid or "Đang nhận IP..."
+
+    # 3. Fallback: general 'ip -j addr' in case of non-standard devices
+    try:
+        out = subprocess.check_output("ip -j addr", shell=True, timeout=1.0).decode()
+        addrs = json.loads(out)
+        for item in addrs:
+            name = item.get("ifname", "")
+            if name == "lo":
+                continue
+            for a in item.get("addr_info", []):
+                if a.get("family") == "inet" and a.get("local") != "127.0.0.1":
+                    cand_ip = a.get("local")
+                    if name.startswith(("eth", "en", "lan")):
+                        return "LAN", cand_ip, ""
+                    elif name.startswith(("wlan", "wl")):
+                        return "WIFI", cand_ip, get_active_wifi_ssid(name)
+    except Exception:
+        pass
+
     return "NONE", "127.0.0.1", ""
 
 def is_wifi_gui_active():
@@ -133,9 +331,9 @@ def is_wifi_gui_active():
     except Exception:
         return False
 
-def generate_wallpaper(wifi_gui_showing=None):
+def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     res, rate, monitor_name = get_display_info()
-    net_type, ip, ssid = check_network_status()
+    net_type, ip, ssid = check_network_status(wait_sync=wait_sync)
     has_network = (net_type != "NONE")
 
     if wifi_gui_showing is None:
@@ -242,11 +440,17 @@ def generate_wallpaper(wifi_gui_showing=None):
     if has_network:
         stat_color = '#30d158'
         if net_type == "LAN":
-            stat_text = "● Đang kết nối mạng LAN"
+            if ip and ip != "127.0.0.1":
+                stat_text = "● Đang kết nối mạng LAN"
+            else:
+                stat_text = "● Đã cắm cáp LAN (Đang nhận IP...)"
             net_text = ""
         else:
             net_label = f"Wi-Fi: {ssid}" if ssid else "Wi-Fi"
-            stat_text = f"● Đang kết nối {net_label}"
+            if ip and ip != "127.0.0.1":
+                stat_text = f"● Đang kết nối {net_label}"
+            else:
+                stat_text = f"● Đã kết nối {net_label} (Đang nhận IP...)"
             net_text = ""
         b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
         stat_h = b_stat[3] - b_stat[1]

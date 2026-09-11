@@ -279,15 +279,23 @@ def main():
     subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
     time.sleep(0.5)
 
-    # Initial Network and Wi-Fi GUI status
-    CURRENT_NET_TYPE, _, _ = make_wallpaper.check_network_status()
+    # Initial Network status synchronized at kernel level
+    CURRENT_NET_TYPE, _, _ = make_wallpaper.check_network_status(wait_sync=True)
     CURRENT_WIFI_GUI_ACTIVE = make_wallpaper.is_wifi_gui_active()
+
+    # Pre-generate standby wallpaper immediately with verified kernel network state
+    monitor_name, res, rate = make_wallpaper.generate_wallpaper(
+        wifi_gui_showing=(CURRENT_NET_TYPE == "NONE"),
+        wait_sync=False
+    )
+    CURRENT_DISPLAY = (monitor_name, res, rate)
+    subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
 
     # Start background watcher threads
     window_watcher()
     hotplug_and_network_watcher()
 
-    # Launch or close Wi-Fi GUI based on initial network state
+    # Launch or close Wi-Fi GUI based on verified initial network state
     manage_wifi_gui()
 
     hw_fallback_active = False
@@ -304,7 +312,7 @@ def main():
             subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
 
         # 1. Detect display and generate wallpaper
-        monitor_name, res, rate = make_wallpaper.generate_wallpaper()
+        monitor_name, res, rate = make_wallpaper.generate_wallpaper(wait_sync=False)
         CURRENT_DISPLAY = (monitor_name, res, rate)
 
         # Apply wallpaper
