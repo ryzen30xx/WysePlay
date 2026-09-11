@@ -290,17 +290,18 @@ def main():
     # Launch or close Wi-Fi GUI based on initial network state
     manage_wifi_gui()
 
+    hw_fallback_active = False
+    consecutive_crashes = 0
+
     while True:
-        # Check if at least one physical display is connected before starting UxPlay
+        # Check if physical display is connected before starting UxPlay
         if not is_physical_display_connected():
-            print("[Kiosk] No physical display connected. Pausing UxPlay server to prevent blind connections...")
-            stop_uxplay(reason="No physical display connected")
+            print("[Kiosk] No physical display connected at startup. Waiting for monitor...")
             while not is_physical_display_connected():
                 time.sleep(1.0)
             print("[Kiosk] Physical display detected! Resuming UxPlay server...")
             time.sleep(0.5)
             subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
-            time.sleep(0.5)
 
         # 1. Detect display and generate wallpaper
         monitor_name, res, rate = make_wallpaper.generate_wallpaper()
@@ -329,6 +330,11 @@ def main():
             print(f"[Kiosk] Benchmark Profile active: {sp.get('tier', 'Custom')} -> Stream: {target_res}@{target_fps}fps (H.265: {target_h265}, Decoder: {decoder}, Sink: {video_sink})")
         else:
             print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps")
+
+        # Automatic Fail-Safe: If hardware decoder previously crashed, force CPU decoder
+        if hw_fallback_active:
+            decoder = "avdec_h264"
+            print("[Kiosk] Chế độ Fail-Safe đang bật: Sử dụng bộ giải mã CPU tiêu chuẩn (avdec_h264)")
 
         # Check for 4K / H.265
         extra_flags = []
@@ -368,14 +374,23 @@ def main():
         # When UxPlay exits, ensure inputs are unlocked and give brief pause
         set_inputs(False)
 
-        # Defensive backoff: only wait if UxPlay crashed immediately (< 2.0s and non-zero exit)
+        # Defensive backoff & Fail-Safe Auto-Recovery
         elapsed = time.time() - start_time
-        if elapsed < 2.0 and ret != 0:
+        if elapsed < 3.0 and ret != 0:
+            consecutive_crashes += 1
             if not is_physical_display_connected():
                 continue
-            print(f"[Kiosk] UxPlay exited prematurely (code {ret}, elapsed {elapsed:.1f}s). Waiting 2s before restart...")
+            
+            # If a custom hardware decoder caused 2 consecutive crashes, automatically drop to CPU decoder
+            if consecutive_crashes >= 2 and decoder not in ('avdec_h264', 'avdec_h265') and not hw_fallback_active:
+                print(f"[Kiosk] CẢNH BÁO: Bộ giải mã '{decoder}' gặp lỗi khi chạy UxPlay. Tự động chuyển sang CPU an toàn (avdec_h264)!")
+                hw_fallback_active = True
+                consecutive_crashes = 0
+
+            print(f"[Kiosk] UxPlay exited prematurely (code {ret}, elapsed {elapsed:.1f}s, crashes: {consecutive_crashes}). Waiting 2s before restart...")
             time.sleep(2.0)
         else:
+            consecutive_crashes = 0
             time.sleep(0.3)
 
 if __name__ == '__main__':
