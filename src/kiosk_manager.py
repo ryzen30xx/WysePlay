@@ -83,7 +83,15 @@ def monitor_uxplay_output(proc):
                 ux_log.flush()
                 if "Initialized GStreamer video renderer" in line or "identified as Connection type RAOP" in line:
                     on_stream_started()
-                elif "Destroying connection" in line or "exiting TCP thread" in line or "Open connections: 0" in line:
+                elif (
+                    "Destroying connection" in line
+                    or "exiting TCP thread" in line
+                    or "Open connections: 0" in line
+                    or "Connection closed for socket" in line
+                    or "running is no longer true" in line
+                    or "video has finished" in line
+                    or "video_reset" in line
+                ):
                     on_stream_ended()
     except Exception as e:
         print("[Kiosk] UxPlay monitor error:", e)
@@ -134,8 +142,7 @@ def window_watcher():
                     if has_win and not CURRENT_LOCKED:
                         on_stream_started()
                     elif not has_win and CURRENT_LOCKED:
-                        if not os.path.exists("/tmp/airplay_streaming"):
-                            on_stream_ended()
+                        on_stream_ended()
                 except Exception:
                     pass
 
