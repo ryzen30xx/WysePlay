@@ -387,7 +387,8 @@ def main():
             '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
-            '-vs', video_sink
+            '-vs', video_sink,
+            '-vsync', 'no'
         ] + extra_flags
 
         print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p, smooth clock-synced)...")
