@@ -95,8 +95,8 @@ if [[ "$ASSUME_YES" != true ]]; then
     user_input=""
     if [[ -t 0 ]]; then
         read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? [Y/n]: " user_input || true
-    elif [[ -e /dev/tty ]] && exec 3< /dev/tty 2>/dev/null; then
-        read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? [Y/n]: " user_input <&3 || true
+    elif { exec 3< /dev/tty; } 2>/dev/null; then
+        read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? [Y/n]: " user_input <&3 2>/dev/null || true
         exec 3<&-
     fi
 
