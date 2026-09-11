@@ -194,6 +194,7 @@ def hotplug_and_network_watcher():
             except Exception as e:
                 print("[Hotplug] pyudev init error:", e)
 
+        disconnect_strikes = 0
         while True:
             event_triggered = False
             if udev_monitor:
@@ -213,15 +214,16 @@ def hotplug_and_network_watcher():
             except Exception as e:
                 print("[Kiosk] UI watcher error:", e)
 
-
-            # 2. Check Display changes
+            # 2. Check Display changes with robust 3s debounce (prevents HDMI HPD micro-glitches from killing UxPlay)
             try:
-                display_connected = is_physical_display_connected()
-                if not display_connected:
-                    stop_uxplay(reason="Physical display disconnected")
+                if not is_physical_display_connected():
+                    disconnect_strikes += 1
+                    if disconnect_strikes >= 3:
+                        stop_uxplay(reason="Physical display disconnected (confirmed 3s)")
                 else:
+                    disconnect_strikes = 0
                     if event_triggered:
-                        time.sleep(0.5)
+                        time.sleep(1.0)
                         subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
                         time.sleep(0.5)
 
@@ -229,13 +231,13 @@ def hotplug_and_network_watcher():
                     new_info = (name, res, rate)
 
                     if CURRENT_DISPLAY is not None and new_info != CURRENT_DISPLAY:
-                        time.sleep(0.5)
+                        time.sleep(1.0)
                         subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
                         time.sleep(0.5)
                         res2, rate2, name2 = make_wallpaper.get_display_info()
                         stable_info = (name2, res2, rate2)
 
-                        if stable_info != CURRENT_DISPLAY:
+                        if stable_info != CURRENT_DISPLAY and stable_info[0] not in ("None", "Unknown"):
                             restart_uxplay_for_display(stable_info)
             except Exception as e:
                 print("[Hotplug] Check error:", e)
@@ -362,6 +364,7 @@ def main():
             '-n', monitor_name,
             '-nohold',
             '-fs',
+            '-p',
             '-s', f'{target_res}@{target_fps}',
             '-fps', str(target_fps),
             '-reset', '3',
@@ -371,14 +374,17 @@ def main():
             '-d'
         ] + extra_flags
 
-        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz)...")
-        with open("/tmp/uxplay.log", "w") as ux_log:
+        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p)...")
+        with open("/tmp/uxplay.log", "a") as ux_log:
+            ux_log.write(f"\n--- [Kiosk] UxPlay Starting at {time.strftime('%Y-%m-%d %H:%M:%S')} (cmd: {' '.join(cmd)}) ---\n")
+            ux_log.flush()
             with STATE_LOCK:
                 CURRENT_PROC = subprocess.Popen(cmd, stdout=ux_log, stderr=subprocess.STDOUT)
 
             start_time = time.time()
             # Block until UxPlay exits (either closed, crashed, or terminated by hotplug watcher)
             ret = CURRENT_PROC.wait()
+            print(f"[Kiosk] UxPlay exited with code {ret} after {time.time() - start_time:.1f}s")
         
         # When UxPlay exits, ensure inputs are unlocked and give brief pause
         set_inputs(False)
