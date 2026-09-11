@@ -463,19 +463,11 @@ class WifiKioskApp:
         final_img = img.resize((self.panel_w, self.sh), Image.Resampling.LANCZOS)
         return ImageTk.PhotoImage(final_img)
 
-    def _prepare_transition_textures(self):
-        """Pre-computes Apple-style crossfade morphing textures between states."""
-        try:
-            img_c = self._render_panel_image(has_network=True)
-            img_d = self._render_panel_image(has_network=False)
-            self.crossfade_photos = []
-            for step in range(11):
-                alpha = step / 10.0
-                blended = Image.blend(img_c, img_d, alpha)
-                res = blended.resize((self.panel_w, self.sh), Image.Resampling.LANCZOS)
-                self.crossfade_photos.append(ImageTk.PhotoImage(res))
-        except Exception as e:
-            print("[WifiKiosk] Crossfade texture error:", e)
+    def update_airplay_panel_image(self):
+        """Renders and updates the AirPlay standby panel based on actual network state."""
+        has_net = (self.net_type != "NONE")
+        self.photo_airplay = self.render_airplay_panel(has_net)
+        self.canvas_root.itemconfig(self.airplay_item, image=self.photo_airplay)
 
 
     def _cache_static_images(self):
@@ -587,8 +579,8 @@ class WifiKioskApp:
         self.root.bind("<Down>", self._on_arrow_down)
         self.root.bind("<Return>", self._on_enter_key)
         self.root.bind("<Escape>", self._on_escape_key)
-        self.root.bind("<w>", lambda e: self._toggle_wifi_manual())
-        self.root.bind("<W>", lambda e: self._toggle_wifi_manual())
+        self.root.bind("<w>", lambda e: self._on_key_w())
+        self.root.bind("<W>", lambda e: self._on_key_w())
         self.root.bind("<F5>", lambda e: self.refresh_networks(force_rescan=True))
         self.root.bind("<r>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
         self.root.bind("<R>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
@@ -596,18 +588,29 @@ class WifiKioskApp:
         self.root.bind("<Q>", lambda e: self.root.destroy() if self.password_ssid is None else None)
         self.root.focus_force()
 
+    def _on_key_w(self):
+        if self.password_ssid is not None:
+            return
+        self._toggle_wifi_manual()
+
     def animate_to_state(self, target_state, force=False):
-        """Executes genuine Apple Spring physics slide with velocity inheritance and crossfade morphing."""
-        if self.current_state == target_state and not force and not self.is_animating:
+        """Executes genuine Apple Spring physics slide with velocity inheritance."""
+        if self.current_state == target_state and not force:
             return
 
+        self.anim_gen = getattr(self, "anim_gen", 0) + 1
+        my_gen = self.anim_gen
+
         self.current_state = target_state
-        has_net = (target_state == "CONNECTED")
+        show_wifi = (target_state == "DISCONNECTED")
+
+        # Update AirPlay standby panel based on actual network connection & manual state
+        self.update_airplay_panel_image()
 
         start_ax = self.cur_ax
         start_wx = self.cur_wx
-        tgt_ax = self.center_ax if has_net else self.shift_ax
-        tgt_wx = self.hidden_wx if has_net else self.target_wx
+        tgt_ax = self.shift_ax if show_wifi else self.center_ax
+        tgt_wx = self.target_wx if show_wifi else self.hidden_wx
 
         # Calculate normalized initial velocity if interrupted mid-spring
         v0_norm = 0.0
@@ -616,23 +619,13 @@ class WifiKioskApp:
             v0_norm = self.cur_vel_ax / dist
 
         # Apple Spring calibrated to Apple TV modal presentation
-        spring = AppleSpring(response=0.44, damping_ratio=0.88, initial_velocity=v0_norm)
+        spring = AppleSpring(response=0.42, damping_ratio=0.86, initial_velocity=v0_norm)
         start_time = time.time()
         self.is_animating = True
 
-        # Pre-compute crossfade table for smooth texture morphing
-        self._prepare_transition_textures()
-
-        # From which texture direction (0.0 is Connected, 1.0 is Disconnected)
-        span = float(self.shift_ax - self.center_ax)
-        if span > 0:
-            start_alpha = (start_ax - self.center_ax) / span
-        else:
-            start_alpha = 0.0
-        start_alpha = max(0.0, min(1.0, start_alpha))
-        target_alpha = 0.0 if has_net else 1.0
-
         def step():
+            if self.anim_gen != my_gen:
+                return
             now = time.time()
             t = now - start_time
             val, vel = spring.solve(t)
@@ -646,12 +639,6 @@ class WifiKioskApp:
             self.cur_ax = ax
             self.cur_wx = wx
 
-            # Apple Crossfade Morphing across spring motion
-            interp_alpha = start_alpha + (target_alpha - start_alpha) * min(1.0, max(0.0, val))
-            idx = int(round(min(1.0, max(0.0, interp_alpha)) * 10))
-            if hasattr(self, "crossfade_photos") and self.crossfade_photos and 0 <= idx < len(self.crossfade_photos):
-                self.canvas_root.itemconfig(self.airplay_item, image=self.crossfade_photos[idx])
-
             if t < spring.duration:
                 self.root.after(16, step)
             else:
@@ -661,10 +648,6 @@ class WifiKioskApp:
                 self.cur_vel_ax = 0.0
                 self.canvas_root.coords(self.airplay_item, tgt_ax, self.sh // 2)
                 self.canvas_root.coords(self.wifi_window, tgt_wx, self.wifi_y)
-
-                final_idx = 0 if has_net else 10
-                if hasattr(self, "crossfade_photos") and self.crossfade_photos and 0 <= final_idx < len(self.crossfade_photos):
-                    self.canvas_root.itemconfig(self.airplay_item, image=self.crossfade_photos[final_idx])
 
                 if target_state == "DISCONNECTED":
                     if self.password_ssid is not None:
@@ -682,7 +665,7 @@ class WifiKioskApp:
 
     def _toggle_wifi_manual(self):
         """Allows the user to manually open/close Wi-Fi selector card via [W] key."""
-        if self.is_animating or self.password_ssid is not None:
+        if self.password_ssid is not None:
             return
         if self.current_state == "CONNECTED":
             print("[WifiKiosk] Manual [W] toggle: Opening Wi-Fi card...")
@@ -699,6 +682,8 @@ class WifiKioskApp:
         try:
             net_type, ip, ssid = make_wallpaper.check_network_status()
             _, _, monitor_name = make_wallpaper.get_display_info()
+
+            monitor_changed = (monitor_name != self.monitor_name)
             self.monitor_name = monitor_name
 
             prev_net_type = self.net_type
@@ -713,6 +698,8 @@ class WifiKioskApp:
                     print("[WifiKiosk] Network connection lost! Sliding to DISCONNECTED state...")
                     self.manual_wifi_open = False
                     self.animate_to_state("DISCONNECTED")
+                elif net_changed or info_changed or monitor_changed:
+                    self.update_airplay_panel_image()
             else:
                 # Network is active (LAN or Wi-Fi)
                 if prev_net_type == "NONE" and net_type != "NONE":
@@ -721,10 +708,11 @@ class WifiKioskApp:
                         print(f"[WifiKiosk] Network restored ({net_type})! Sliding to CONNECTED state...")
                         self.manual_wifi_open = False
                         self.animate_to_state("CONNECTED")
-                elif self.current_state == "CONNECTED" and (net_changed or info_changed) and not self.is_animating:
+                    else:
+                        self.update_airplay_panel_image()
+                elif (net_changed or info_changed or monitor_changed) and not self.is_animating:
                     # Update active connection display (e.g. DHCP IP assigned)
-                    self.photo_airplay = self.render_airplay_panel(True)
-                    self.canvas_root.itemconfig(self.airplay_item, image=self.photo_airplay)
+                    self.update_airplay_panel_image()
         except Exception as e:
             print("[WifiKiosk] Poller error:", e)
 
