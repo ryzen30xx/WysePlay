@@ -235,6 +235,66 @@ sudo systemctl stop airplay-kiosk
 
 ---
 
+## 🗑️ Gỡ Cài Đặt (Uninstallation)
+
+Nếu bạn muốn gỡ bỏ hoàn toàn WysePlay và trả hệ thống về nguyên bản, bạn có thể thực hiện theo một trong hai cách sau:
+
+### Cách 1: Gỡ tự động bằng One-Liner Script (Khuyên Dùng)
+
+Chạy lệnh gỡ cài đặt nhanh qua curl:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ryzen30xx/WysePlay/main/uninstall.sh | sudo bash
+```
+
+Hoặc nếu bạn đã tải mã nguồn về máy:
+```bash
+sudo bash uninstall.sh
+```
+
+> [!NOTE]
+> Nếu bạn muốn gỡ bỏ sạch sẽ cả các gói thư viện APT (`uxplay`, `openbox`, `feh`, `xdotool`...) và dọn dẹp hệ thống, hãy thêm cờ `--purge-packages`:
+> ```bash
+> sudo bash uninstall.sh --purge-packages
+> ```
+
+---
+
+### Cách 2: Gỡ thủ công từng bước bằng tay
+
+Nếu muốn tự tay xóa từng thành phần:
+
+```bash
+# 1. Dừng và vô hiệu hóa dịch vụ Kiosk
+sudo systemctl stop airplay-kiosk.service
+sudo systemctl disable airplay-kiosk.service
+sudo rm -f /etc/systemd/system/airplay-kiosk.service
+sudo systemctl daemon-reload
+
+# 2. Khôi phục quản lý nguồn điện & bàn điều khiển TTY1
+sudo systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target
+sudo systemctl enable --now getty@tty1.service
+
+# 3. Xóa thư mục chương trình và cấu hình
+sudo rm -rf /opt/airplay
+sudo rm -f /etc/wyseplay.conf
+sudo rm -f /etc/X11/Xwrapper.config
+
+# 4. Xóa phông chữ Apple SF Pro
+sudo rm -rf /usr/local/share/fonts/apple-sf-pro
+sudo fc-cache -f
+
+# 5. Dọn dẹp cấu hình giao diện người dùng
+rm -f ~/.config/openbox/rc.xml
+rm -f ~/.Xresources
+
+# 6. (Tùy chọn) Gỡ các gói thư viện phụ thuộc
+sudo apt-get purge -y uxplay openbox unclutter xdotool feh scrot
+sudo apt-get autoremove -y
+```
+
+---
+
 ## 📄 Bản Quyền & Giấy Phép (License)
 
 Dự án được phân phối dưới giấy phép **MIT License**. Bạn được toàn quyền sử dụng, sửa đổi và triển khai cho mục đích cá nhân hoặc doanh nghiệp.
