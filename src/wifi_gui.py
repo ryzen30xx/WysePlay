@@ -368,19 +368,25 @@ class WifiKioskApp:
         pill_h = max(b_lbl[3] - b_lbl[1], b_val[3] - b_val[1]) + pad_y * 2
 
         if has_network:
-            stat_text = "Đang chờ kết nối..."
-            stat_color = "#86868b"
+            stat_color = "#30d158"
+            if self.net_type == "LAN":
+                stat_text = f"● Đang kết nối mạng LAN ({self.ip})" if (self.ip and self.ip != "127.0.0.1") else "● Đang kết nối mạng LAN"
+                net_text = ""
+            else:
+                net_label = f"Wi-Fi: {self.ssid}" if self.ssid else "Wi-Fi"
+                stat_text = f"● Đang kết nối {net_label} ({self.ip})" if (self.ip and self.ip != "127.0.0.1") else f"● Đang kết nối {net_label}"
+                net_text = ""
             b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
             stat_h = b_stat[3] - b_stat[1]
 
-            gap_stat_net = int(14 * scale)
-            if self.net_type == "LAN":
-                net_text = "● Mạng dây (LAN)"
+            has_net_line = bool(net_text)
+            if has_net_line:
+                b_net = draw.textbbox((0, 0), net_text, font=font_status)
+                net_h = b_net[3] - b_net[1]
+                gap_stat_net = int(14 * scale)
             else:
-                net_label = f"Wi-Fi: {self.ssid}" if self.ssid else "Wi-Fi"
-                net_text = f"● {net_label} ({self.ip})"
-            b_net = draw.textbbox((0, 0), net_text, font=font_status)
-            net_h = b_net[3] - b_net[1]
+                net_h = 0
+                gap_stat_net = 0
 
             inst1 = "Mở Trung tâm điều khiển trên iPhone, iPad hoặc Mac"
             inst2 = f"Chọn \"{val_txt}\" để kết nối"
@@ -391,14 +397,20 @@ class WifiKioskApp:
             if getattr(self, "manual_wifi_open", False):
                 hint_txt = "Nhấn phím [Esc] trên bàn phím để đóng cài đặt Wi-Fi"
             else:
-                hint_txt = "Nhấn phím [W] trên bàn phím để mở cài đặt Wi-Fi"
-            b_h = draw.textbbox((0, 0), hint_txt, font=font_hint)
-            hint_h = b_h[3] - b_h[1]
+                hint_txt = ""
 
+            has_hint = bool(hint_txt)
+            if has_hint:
+                b_h = draw.textbbox((0, 0), hint_txt, font=font_hint)
+                hint_h = b_h[3] - b_h[1]
+                gap_hint = int(26 * scale)
+            else:
+                hint_h = 0
+                gap_hint = 0
 
             total_h = (target_icon_h + int(20 * scale) + title_h + int(24 * scale) + pill_h +
-                       int(24 * scale) + stat_h + gap_stat_net + net_h + int(22 * scale) + inst_h +
-                       int(26 * scale) + hint_h)
+                       int(24 * scale) + stat_h + (gap_stat_net + net_h if has_net_line else 0) +
+                       int(22 * scale) + inst_h + (gap_hint + hint_h if has_hint else 0))
         else:
             stat_text = "● Chưa có kết nối mạng"
             stat_color = "#ff9f0a"
@@ -437,7 +449,7 @@ class WifiKioskApp:
         current_y += stat_h
 
         # Draw Network Info or Spacing
-        if has_network:
+        if has_network and has_net_line:
             current_y += gap_stat_net
             draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill="#5e5e62", font=font_status)
             current_y += net_h + int(22 * scale)
@@ -450,9 +462,9 @@ class WifiKioskApp:
         draw.text((center_x - (b_i2[2] - b_i2[0]) // 2, current_y), inst2, fill="#5e5e62", font=font_inst2)
         current_y += (b_i2[3] - b_i2[1])
 
-        # Draw Subtle Key Hint when connected
-        if has_network:
-            current_y += int(26 * scale)
+        # Draw Subtle Key Hint if present
+        if has_network and has_hint:
+            current_y += gap_hint
             draw.text((center_x - (b_h[2] - b_h[0]) // 2, current_y), hint_txt, fill="#3a3a3c", font=font_hint)
 
         return img

@@ -240,19 +240,25 @@ def generate_wallpaper(wifi_gui_showing=None):
     gap_pill_stat = int(24 * scale)
 
     if has_network:
-        stat_text = "Đang chờ kết nối..."
-        stat_color = '#86868b'
+        stat_color = '#30d158'
+        if net_type == "LAN":
+            stat_text = f"● Đang kết nối mạng LAN ({ip})" if (ip and ip != "127.0.0.1") else "● Đang kết nối mạng LAN"
+            net_text = ""
+        else:
+            net_label = f"Wi-Fi: {ssid}" if ssid else "Wi-Fi"
+            stat_text = f"● Đang kết nối {net_label} ({ip})" if (ip and ip != "127.0.0.1") else f"● Đang kết nối {net_label}"
+            net_text = ""
         b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
         stat_h = b_stat[3] - b_stat[1]
 
-        gap_stat_net = int(14 * scale)
-        if net_type == "LAN":
-            net_text = "● Mạng dây (LAN)"
+        has_net_line = bool(net_text)
+        if has_net_line:
+            b_net = draw.textbbox((0, 0), net_text, font=font_status)
+            net_h = b_net[3] - b_net[1]
+            gap_stat_net = int(14 * scale)
         else:
-            net_label = f"Wi-Fi: {ssid}" if ssid else "Wi-Fi"
-            net_text = f"● {net_label} ({ip})"
-        b_net = draw.textbbox((0, 0), net_text, font=font_status)
-        net_h = b_net[3] - b_net[1]
+            net_h = 0
+            gap_stat_net = 0
 
         gap_net_inst = int((22 if wifi_gui_showing else 26) * scale)
         inst1 = "Mở Trung tâm điều khiển trên iPhone, iPad hoặc Mac"
@@ -262,7 +268,7 @@ def generate_wallpaper(wifi_gui_showing=None):
         inst_h = (b_i1[3] - b_i1[1]) + int(8 * scale) + (b_i2[3] - b_i2[1])
 
         total_h = (target_icon_h + gap_icon_title + title_h + gap_title_pill +
-                   pill_h + gap_pill_stat + stat_h + gap_stat_net + net_h +
+                   pill_h + gap_pill_stat + stat_h + (gap_stat_net + net_h if has_net_line else 0) +
                    gap_net_inst + inst_h)
     else:
         stat_text = "● Chưa có kết nối mạng"
@@ -304,10 +310,12 @@ def generate_wallpaper(wifi_gui_showing=None):
     current_y += stat_h
 
     # Draw Network Status if available
-    if has_network:
+    if has_network and has_net_line:
         current_y += gap_stat_net
         draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill='#5e5e62', font=font_status)
         current_y += net_h + gap_net_inst
+    elif has_network:
+        current_y += gap_net_inst
     else:
         current_y += gap_stat_inst
 
