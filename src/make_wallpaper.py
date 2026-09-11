@@ -136,7 +136,8 @@ def generate_wallpaper(wifi_gui_showing=None):
     has_network = (net_type != "NONE")
 
     if wifi_gui_showing is None:
-        wifi_gui_showing = is_wifi_gui_active() or (not has_network)
+        # Layout shifts right ONLY when there is no network connection (to make room for Wi-Fi setup modal)
+        wifi_gui_showing = (not has_network)
 
     parts = res.split('x')
     target_w, target_h = int(parts[0]), int(parts[1])

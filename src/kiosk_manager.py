@@ -81,19 +81,24 @@ def manage_wifi_gui():
                 make_wallpaper.generate_wallpaper(wifi_gui_showing=True)
                 subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
         else:
-            # Connected to LAN or Wi-Fi -> close wifi setup GUI
-            if WIFI_GUI_PROC is not None and WIFI_GUI_PROC.poll() is None:
-                print(f"[Kiosk] Network connected ({CURRENT_NET_TYPE}): Closing Wi-Fi Setup GUI...")
+            # Connected to LAN or Wi-Fi -> strictly close Wi-Fi GUI
+            if WIFI_GUI_PROC is not None:
                 try:
                     WIFI_GUI_PROC.terminate()
                     WIFI_GUI_PROC.wait(timeout=1.0)
                 except Exception:
-                    if WIFI_GUI_PROC and WIFI_GUI_PROC.poll() is None:
+                    if WIFI_GUI_PROC.poll() is None:
                         WIFI_GUI_PROC.kill()
                 WIFI_GUI_PROC = None
-                CURRENT_WIFI_GUI_ACTIVE = False
-                make_wallpaper.generate_wallpaper(wifi_gui_showing=False)
-                subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+
+            # Always kill any stray or orphaned wifi_gui.py process
+            if make_wallpaper.is_wifi_gui_active():
+                print(f"[Kiosk] Network active ({CURRENT_NET_TYPE}): Terminating running Wi-Fi GUI...")
+                subprocess.run('pkill -9 -f wifi_gui.py 2>/dev/null', shell=True)
+
+            CURRENT_WIFI_GUI_ACTIVE = False
+            make_wallpaper.generate_wallpaper(wifi_gui_showing=False)
+            subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
 
 def get_uxplay_tcp_connections(pid):
     """
@@ -245,30 +250,23 @@ def hotplug_and_network_watcher():
             else:
                 time.sleep(1.0)
 
-            # 1. Check Network changes
+            # 1. Check Network changes and enforce Wi-Fi GUI policy
             try:
                 net_type, _, _ = make_wallpaper.check_network_status()
                 if CURRENT_NET_TYPE is not None and net_type != CURRENT_NET_TYPE:
                     print(f"[Network] Network state changed: {CURRENT_NET_TYPE} -> {net_type}")
                     CURRENT_NET_TYPE = net_type
-                    make_wallpaper.generate_wallpaper()
-                    subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+                    manage_wifi_gui()
+                elif CURRENT_NET_TYPE != "NONE" and make_wallpaper.is_wifi_gui_active():
+                    # Defensive guard: Network is connected, but Wi-Fi GUI is active -> kill it!
+                    print(f"[Kiosk] Guard: Network active ({CURRENT_NET_TYPE}), force-closing unwanted Wi-Fi GUI...")
+                    manage_wifi_gui()
+                elif CURRENT_NET_TYPE == "NONE" and not make_wallpaper.is_wifi_gui_active():
+                    # Defensive guard: No network, but Wi-Fi GUI is not running -> start it!
+                    print("[Kiosk] Guard: No network connection, launching Wi-Fi GUI...")
                     manage_wifi_gui()
             except Exception as e:
                 print("[Network] Watcher error:", e)
-
-            # 1b. Check Wi-Fi GUI active state changes
-            try:
-                wifi_active = make_wallpaper.is_wifi_gui_active()
-                if CURRENT_WIFI_GUI_ACTIVE is not None and wifi_active != CURRENT_WIFI_GUI_ACTIVE:
-                    print(f"[Kiosk] Wi-Fi GUI visibility changed: {CURRENT_WIFI_GUI_ACTIVE} -> {wifi_active}")
-                    CURRENT_WIFI_GUI_ACTIVE = wifi_active
-                    make_wallpaper.generate_wallpaper(wifi_gui_showing=wifi_active)
-                    subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
-                elif CURRENT_WIFI_GUI_ACTIVE is None:
-                    CURRENT_WIFI_GUI_ACTIVE = wifi_active
-            except Exception as e:
-                pass
 
             # 2. Check Display changes
             try:

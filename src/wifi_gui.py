@@ -1,4 +1,6 @@
 import os, sys, subprocess, re, time, threading
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, "/opt/airplay")
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
@@ -429,6 +431,17 @@ class WifiSetupApp:
 
     def _auto_scan_loop(self):
         """Runs silently every 10 seconds without interrupting user input or jumping selection."""
+        # Check if network became active (e.g. Ethernet plugged in or Wi-Fi connected)
+        try:
+            import make_wallpaper
+            net_type, _, _ = make_wallpaper.check_network_status()
+            if net_type != "NONE":
+                print(f"[WifiGUI] Network is active ({net_type}). Auto-closing Wi-Fi GUI...")
+                self.root.destroy()
+                return
+        except Exception:
+            pass
+
         if not self.is_connecting:
             self.refresh_networks(force_rescan=True, silent=True)
         self.root.after(10000, self._auto_scan_loop)
@@ -641,6 +654,17 @@ class WifiSetupApp:
             self.entry_pwd.focus_set()
 
 def main():
+    # Defensive check: if network is already connected (LAN or Wi-Fi), do not open Wi-Fi GUI!
+    if '--force' not in sys.argv:
+        try:
+            import make_wallpaper
+            net_type, _, _ = make_wallpaper.check_network_status()
+            if net_type != "NONE":
+                print(f"[WifiGUI] Network is already active ({net_type}). No setup required, exiting.")
+                sys.exit(0)
+        except Exception:
+            pass
+
     root = tk.Tk(className="WifiKiosk")
     app = WifiSetupApp(root)
     root.mainloop()
