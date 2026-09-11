@@ -92,17 +92,19 @@ if [[ "$ASSUME_YES" != true ]]; then
         echo -e "${C_RED}Lựa chọn --purge-packages sẽ gỡ bỏ cả các gói apt (uxplay, openbox, gstreamer...).${C_RESET}"
     fi
 
-    user_input=""
     if [[ -t 0 ]]; then
         read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? [Y/n]: " user_input || true
-    elif { exec 3< /dev/tty; } 2>/dev/null; then
-        read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? [Y/n]: " user_input <&3 2>/dev/null || true
-        exec 3<&-
-    fi
-
-    if [[ -n "$user_input" && "$user_input" =~ ^[nN] ]]; then
-        log_info "Đã hủy thao tác gỡ cài đặt."
-        exit 0
+        if [[ -n "$user_input" && "$user_input" =~ ^[nN] ]]; then
+            log_info "Đã hủy thao tác gỡ cài đặt."
+            exit 0
+        fi
+    else
+        echo -e "${C_CYAN}Tiến trình gỡ cài đặt sẽ tự động bắt đầu sau 3 giây... (Nhấn Ctrl+C để hủy)${C_RESET}"
+        for i in 3 2 1; do
+            echo -ne "\r${C_GRAY}Đang chuẩn bị... ${i}s${C_RESET} "
+            sleep 1
+        done
+        echo ""
     fi
 fi
 
@@ -118,8 +120,11 @@ if systemctl is-enabled --quiet airplay-kiosk.service 2>/dev/null; then
     log_success "Đã vô hiệu hóa tự khởi động airplay-kiosk"
 fi
 
-# Kill any leftover kiosk/uxplay processes
-pkill -9 -f 'start_kiosk.sh|kiosk_manager.py|wifi_gui.py|uxplay' 2>/dev/null || true
+# Kill any leftover kiosk/uxplay/X11 processes
+pkill -9 -f 'start_kiosk|kiosk_manager|wifi_gui|uxplay' 2>/dev/null || true
+pkill -9 Xorg 2>/dev/null || true
+pkill -9 xinit 2>/dev/null || true
+pkill -9 openbox 2>/dev/null || true
 
 # Remove systemd service file
 if [[ -f /etc/systemd/system/airplay-kiosk.service ]]; then
@@ -128,13 +133,38 @@ if [[ -f /etc/systemd/system/airplay-kiosk.service ]]; then
     log_success "Đã xóa tệp cấu hình: /etc/systemd/system/airplay-kiosk.service"
 fi
 
-# 3. Restore systemd power management targets & TTY1
-log_step "Khôi phục trạng thái quản lý nguồn điện & TTY1..."
+# 3. Restore systemd power management targets & TTY1 CLI Console
+log_step "Khôi phục trạng thái quản lý nguồn điện & giao diện dòng lệnh (TTY1)..."
 systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
 log_success "Đã mở khóa (unmask) chế độ Sleep / Suspend / Hibernate"
 
+# Ensure VT console is mapped to the active GPU/DRM framebuffer
+if ! command -v con2fbmap >/dev/null 2>&1; then
+    apt-get install -y --no-install-recommends fbset >/dev/null 2>&1 || true
+fi
+
+ACTIVE_FB=$(ls -d /sys/class/graphics/fb[0-9]* 2>/dev/null | sort -V | tail -n 1 | sed 's/.*fb//' || true)
+if [[ -n "$ACTIVE_FB" ]] && command -v con2fbmap >/dev/null 2>&1; then
+    for vt in {1..6}; do
+        con2fbmap "$vt" "$ACTIVE_FB" >/dev/null 2>&1 || true
+    done
+fi
+
+# Unblank all framebuffers
+for fb_blank in /sys/class/graphics/fb[0-9]*/blank; do
+    if [[ -f "$fb_blank" ]]; then
+        echo 0 > "$fb_blank" 2>/dev/null || true
+    fi
+done
+
+# Switch foreground console to TTY1 and wake display
+chvt 1 2>/dev/null || true
+printf "\033[9;0]\033[14;0]" > /dev/tty1 2>/dev/null || true
+setterm --blank 0 --powerdown 0 > /dev/tty1 2>/dev/null || true
+
 systemctl enable --now getty@tty1.service >/dev/null 2>&1 || true
-log_success "Đã khôi phục dịch vụ bàn điều khiển getty@tty1"
+systemctl restart getty@tty1.service >/dev/null 2>&1 || true
+log_success "Đã khôi phục và kích hoạt giao diện dòng lệnh (login prompt) trên TTY1"
 
 # 4. Remove WysePlay Application Files
 log_step "Xóa tệp chương trình và tài nguyên ứng dụng..."
