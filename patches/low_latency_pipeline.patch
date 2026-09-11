@@ -1,5 +1,5 @@
 diff --git a/lib/raop_rtp_mirror.c b/lib/raop_rtp_mirror.c
-index bc88472..0e7aaec 100644
+index bc88472..3a35b53 100644
 --- a/lib/raop_rtp_mirror.c
 +++ b/lib/raop_rtp_mirror.c
 @@ -287,6 +287,18 @@ raop_rtp_mirror_thread(void *arg)
@@ -12,7 +12,7 @@ index bc88472..0e7aaec 100644
 +                logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
 +                           "raop_rtp_mirror could not set stream socket TCP_NODELAY %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
 +            }
-+            int rcvbuf_val = 131072;
++            int rcvbuf_val = 65536;
 +            if (setsockopt(stream_fd, SOL_SOCKET, SO_RCVBUF, CAST &rcvbuf_val, sizeof(rcvbuf_val)) < 0) {
 +                int sock_err = SOCKET_GET_ERROR();
 +                logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
@@ -22,7 +22,7 @@ index bc88472..0e7aaec 100644
          }
  
 diff --git a/renderers/video_renderer.c b/renderers/video_renderer.c
-index 4473901..fc3ed2c 100644
+index 4473901..d874755 100644
 --- a/renderers/video_renderer.c
 +++ b/renderers/video_renderer.c
 @@ -262,15 +262,14 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
@@ -30,13 +30,13 @@ index 4473901..fc3ed2c 100644
              }
              GString *launch = g_string_new("appsrc name=video_source ! ");
 -            g_string_append(launch, "queue ! ");
-+            g_string_append(launch, "queue max-size-buffers=8 max-size-bytes=0 max-size-time=0 ! ");
++            g_string_append(launch, "queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, parser);
 -            g_string_append(launch, " ! ");
 +            g_string_append(launch, " ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, decoder);
 -            g_string_append(launch, " ! ");
-+            g_string_append(launch, " ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
++            g_string_append(launch, " ! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
              append_videoflip(launch, &videoflip[0], &videoflip[1]);
              g_string_append(launch, converter);
              g_string_append(launch, " ! ");
@@ -44,3 +44,12 @@ index 4473901..fc3ed2c 100644
              g_string_append(launch, videosink);
              g_string_append(launch, " name=");
              g_string_append(launch, videosink);
+@@ -313,7 +312,7 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
+             renderer_type[i]->appsrc = gst_bin_get_by_name (GST_BIN (renderer_type[i]->pipeline), "video_source");
+             g_assert(renderer_type[i]->appsrc);
+ 
+-            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, NULL);
++            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-bytes", (guint64) 0, NULL);
+             g_string_free(launch, TRUE);
+             gst_caps_unref(caps);
+ 	    gst_object_unref(clock);
