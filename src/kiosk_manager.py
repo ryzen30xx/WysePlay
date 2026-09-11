@@ -377,6 +377,9 @@ def main():
         elif decoder == 'avdec_h264':
             extra_flags.append('-avdec')
 
+        # Low latency buffer reporting (100ms) and multi-core color conversion
+        extra_flags.extend(['-al', '0.1', '-vc', 'videoconvert n-threads=4'])
+
         cmd = [
             'stdbuf', '-oL', '-eL',
             'uxplay',
@@ -389,8 +392,8 @@ def main():
             '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
-            '-vs', video_sink,
-            '-vsync', 'no'
+            '-FPSdata',
+            '-vs', video_sink
         ] + extra_flags
 
         print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p, smooth clock-synced)...")
