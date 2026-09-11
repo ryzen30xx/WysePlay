@@ -603,10 +603,17 @@ class WifiKioskApp:
     def _on_key_w(self):
         if self.password_ssid is not None:
             return
+        if self.net_type == "LAN":
+            print("[WifiKiosk] [W] ignored: LAN is connected, Wi-Fi dashboard is disabled.")
+            return
         self._toggle_wifi_manual()
 
     def animate_to_state(self, target_state, force=False):
         """Executes genuine Apple Spring physics slide with velocity inheritance."""
+        if target_state == "DISCONNECTED" and self.net_type == "LAN" and not force:
+            print("[WifiKiosk] Blocked Wi-Fi dashboard: LAN is connected.")
+            return
+
         if self.current_state == target_state and not force:
             return
 
@@ -679,6 +686,12 @@ class WifiKioskApp:
         """Allows the user to manually open/close Wi-Fi selector card via [W] key."""
         if self.password_ssid is not None:
             return
+        if self.net_type == "LAN":
+            print("[WifiKiosk] LAN is connected; Wi-Fi dashboard cannot be opened.")
+            if self.current_state != "CONNECTED":
+                self.manual_wifi_open = False
+                self.animate_to_state("CONNECTED")
+            return
         if self.current_state == "CONNECTED":
             print("[WifiKiosk] Manual [W] toggle: Opening Wi-Fi card...")
             self.manual_wifi_open = True
@@ -712,8 +725,16 @@ class WifiKioskApp:
                     self.animate_to_state("DISCONNECTED")
                 elif net_changed or info_changed or monitor_changed:
                     self.update_airplay_panel_image()
+            elif net_type == "LAN":
+                # LAN takes absolute priority: ensure Wi-Fi dashboard is closed
+                if self.current_state != "CONNECTED":
+                    print("[WifiKiosk] LAN connected; closing Wi-Fi dashboard...")
+                    self.manual_wifi_open = False
+                    self.animate_to_state("CONNECTED")
+                elif net_changed or info_changed or monitor_changed:
+                    self.update_airplay_panel_image()
             else:
-                # Network is active (LAN or Wi-Fi)
+                # Network is active (Wi-Fi)
                 if prev_net_type == "NONE" and net_type != "NONE":
                     # Network was previously down and is now restored
                     if self.password_ssid is None and not self.is_connecting:
