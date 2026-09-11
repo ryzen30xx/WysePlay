@@ -392,6 +392,7 @@ def main():
             '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
+            '-vsync', 'no',
             '-FPSdata',
             '-vs', video_sink
         ] + extra_flags
