@@ -374,6 +374,8 @@ def main():
 
         if decoder and decoder not in ('avdec_h264', 'avdec_h265'):
             extra_flags.extend(['-vd', decoder])
+        elif decoder == 'avdec_h264':
+            extra_flags.append('-avdec')
 
         cmd = [
             'stdbuf', '-oL', '-eL',
