@@ -69,36 +69,13 @@ def has_active_video_window():
     return False
 
 def manage_wifi_gui():
-    global WIFI_GUI_PROC, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
+    global WIFI_GUI_PROC
     with STATE_LOCK:
-        if CURRENT_NET_TYPE == "NONE":
-            # Need wifi setup GUI
-            if WIFI_GUI_PROC is None or WIFI_GUI_PROC.poll() is not None:
-                print("[Kiosk] No network: Launching interactive Wi-Fi Setup GUI...")
-                env = dict(os.environ, DISPLAY=":0")
-                WIFI_GUI_PROC = subprocess.Popen(["python3", "/opt/airplay/wifi_gui.py"], env=env)
-                CURRENT_WIFI_GUI_ACTIVE = True
-                make_wallpaper.generate_wallpaper(wifi_gui_showing=True)
-                subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
-        else:
-            # Connected to LAN or Wi-Fi -> strictly close Wi-Fi GUI
-            if WIFI_GUI_PROC is not None:
-                try:
-                    WIFI_GUI_PROC.terminate()
-                    WIFI_GUI_PROC.wait(timeout=1.0)
-                except Exception:
-                    if WIFI_GUI_PROC.poll() is None:
-                        WIFI_GUI_PROC.kill()
-                WIFI_GUI_PROC = None
+        if WIFI_GUI_PROC is None or WIFI_GUI_PROC.poll() is not None:
+            print("[Kiosk] Launching/ensuring unified Standby & Wi-Fi Kiosk UI...")
+            env = dict(os.environ, DISPLAY=":0")
+            WIFI_GUI_PROC = subprocess.Popen(["python3", "/opt/airplay/wifi_gui.py"], env=env)
 
-            # Always kill any stray or orphaned wifi_gui.py process
-            if make_wallpaper.is_wifi_gui_active():
-                print(f"[Kiosk] Network active ({CURRENT_NET_TYPE}): Terminating running Wi-Fi GUI...")
-                subprocess.run('pkill -9 -f wifi_gui.py 2>/dev/null', shell=True)
-
-            CURRENT_WIFI_GUI_ACTIVE = False
-            make_wallpaper.generate_wallpaper(wifi_gui_showing=False)
-            subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
 
 def get_uxplay_tcp_connections(pid):
     """
@@ -219,9 +196,17 @@ def stop_uxplay(reason="Display disconnected"):
                     CURRENT_PROC.kill()
 
 def restart_uxplay_for_display(new_display_info):
-    """Gracefully terminates running UxPlay so supervisor loop restarts with new display profile."""
+    """Gracefully terminates running UxPlay and Kiosk UI so they restart with new display profile."""
+    global WIFI_GUI_PROC
     print(f"[Hotplug] Display change detected! New target: {new_display_info}")
     stop_uxplay(reason="Display configuration changed")
+    with STATE_LOCK:
+        if WIFI_GUI_PROC is not None:
+            try:
+                WIFI_GUI_PROC.terminate()
+            except Exception:
+                pass
+            WIFI_GUI_PROC = None
 
 def hotplug_and_network_watcher():
     """Watches for display hotplug (via udev/DRM + RandR polling) and network state changes."""
@@ -250,23 +235,12 @@ def hotplug_and_network_watcher():
             else:
                 time.sleep(1.0)
 
-            # 1. Check Network changes and enforce Wi-Fi GUI policy
+            # 1. Ensure unified Standby & Wi-Fi Kiosk UI is alive
             try:
-                net_type, _, _ = make_wallpaper.check_network_status()
-                if CURRENT_NET_TYPE is not None and net_type != CURRENT_NET_TYPE:
-                    print(f"[Network] Network state changed: {CURRENT_NET_TYPE} -> {net_type}")
-                    CURRENT_NET_TYPE = net_type
-                    manage_wifi_gui()
-                elif CURRENT_NET_TYPE != "NONE" and make_wallpaper.is_wifi_gui_active():
-                    # Defensive guard: Network is connected, but Wi-Fi GUI is active -> kill it!
-                    print(f"[Kiosk] Guard: Network active ({CURRENT_NET_TYPE}), force-closing unwanted Wi-Fi GUI...")
-                    manage_wifi_gui()
-                elif CURRENT_NET_TYPE == "NONE" and not make_wallpaper.is_wifi_gui_active():
-                    # Defensive guard: No network, but Wi-Fi GUI is not running -> start it!
-                    print("[Kiosk] Guard: No network connection, launching Wi-Fi GUI...")
-                    manage_wifi_gui()
+                manage_wifi_gui()
             except Exception as e:
-                print("[Network] Watcher error:", e)
+                print("[Kiosk] UI watcher error:", e)
+
 
             # 2. Check Display changes
             try:

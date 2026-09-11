@@ -94,9 +94,12 @@ def get_display_info():
 
 def check_network_status():
     """Returns (net_type, ip, extra_info) where net_type is LAN, WIFI, or NONE"""
+    if os.path.exists("/tmp/simulate_offline"):
+        return "NONE", "127.0.0.1", ""
     net_type = "NONE"
     ip = "127.0.0.1"
     ssid = ""
+
     try:
         out = subprocess.check_output("ip -j addr", shell=True).decode()
         addrs = json.loads(out)

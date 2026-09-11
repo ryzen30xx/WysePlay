@@ -3,6 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, "/opt/airplay")
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+import make_wallpaper
 
 FONT_FAMILY_DISP = "SF Pro Display"
 FONT_FAMILY_TEXT = "SF Pro Text"
@@ -12,6 +13,7 @@ def get_font_file(filename):
         f"/usr/local/share/fonts/apple-sf-pro/{filename}",
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts", filename),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", filename),
+        os.path.join("/opt/airplay/fonts", filename),
     ]
     for c in candidates:
         if os.path.exists(c):
@@ -50,8 +52,7 @@ def make_rounded_img(w, h, r, fill, outline=None, outline_width=1):
         outline=outline,
         width=outline_width * scale
     )
-    img = img.resize((w, h), Image.Resampling.LANCZOS)
-    return ImageTk.PhotoImage(img)
+    return ImageTk.PhotoImage(img.resize((w, h), Image.Resampling.LANCZOS))
 
 def make_apple_wifi_badge(size=38, bg_col="#0071e3"):
     """Renders the authentic circular Apple Wi-Fi badge using the official SF Symbol."""
@@ -70,8 +71,7 @@ def make_apple_wifi_badge(size=38, bg_col="#0071e3"):
     except Exception:
         pass
 
-    img = img.resize((size, size), Image.Resampling.LANCZOS)
-    return ImageTk.PhotoImage(img)
+    return ImageTk.PhotoImage(img.resize((size, size), Image.Resampling.LANCZOS))
 
 def make_pill_button(w, h, r, bg_color, text, text_color="#ffffff", is_bold=True):
     """Renders an Apple TV-style pill button with supersampled crisp SF Pro typography."""
@@ -94,8 +94,7 @@ def make_pill_button(w, h, r, bg_color, text, text_color="#ffffff", is_bold=True
     ty = (sh - th) // 2 - bbox[1] - int(1 * scale)
     draw.text((tx, ty), text, fill=text_color, font=font)
     
-    img = img.resize((w, h), Image.Resampling.LANCZOS)
-    return ImageTk.PhotoImage(img)
+    return ImageTk.PhotoImage(img.resize((w, h), Image.Resampling.LANCZOS))
 
 def render_row_image(w, h, r, net, is_sel):
     """Renders a vector-crisp Wi-Fi list row item with official Apple SF Symbols and SF Pro fonts."""
@@ -117,7 +116,7 @@ def render_row_image(w, h, r, net, is_sel):
         
     draw.text((18 * scale, 9 * scale), net["ssid"], fill="#ffffff", font=font_ssid)
     
-    sec_label = "Mạng mở" if (not net.get("security") or net["security"] == "--") else f"Bảo mật {net['security']}"
+    sec_label = "Mạng mở" if (not net.get("security") or net["security"] == "--") else f"Bảo mật {net["security"]}"
     sub_col = "#d0e4ff" if is_sel else "#86868b"
     draw.text((18 * scale, 31 * scale), sec_label, fill=sub_col, font=font_sec)
     
@@ -152,16 +151,16 @@ def render_row_image(w, h, r, net, is_sel):
         except Exception:
             pass
                  
-    img = img.resize((w, h), Image.Resampling.LANCZOS)
-    return ImageTk.PhotoImage(img)
+    return ImageTk.PhotoImage(img.resize((w, h), Image.Resampling.LANCZOS))
 
-class WifiSetupApp:
+class WifiKioskApp:
     def __init__(self, root):
         self.root = root
         self.root.title("WifiKiosk")
         self.root.configure(bg="#070709")
+        self.root.attributes("-fullscreen", True)
 
-        # Ensure all hardware inputs are enabled
+        # Unhide cursor & ensure hardware inputs are enabled
         try:
             subprocess.run(
                 'DISPLAY=:0 xinput list | grep slave | grep id= | grep -o "id=[0-9]*" | cut -d= -f2 | xargs -I{} DISPLAY=:0 xinput enable {} 2>/dev/null',
@@ -170,27 +169,33 @@ class WifiSetupApp:
         except Exception:
             pass
 
-        # Apple TV dark aesthetic palette
+        # Screen dimensions
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        if not sw or sw <= 0:
+            sw = 1280
+        if not sh or sh <= 0:
+            sh = 800
+        self.sw = sw
+        self.sh = sh
+
+        # Apple TV dark palette
         self.COLOR_BG          = "#070709"
-        self.COLOR_MODAL       = "#161618" # Main modal card
-        self.COLOR_CARD_NORM   = "#1c1c1e" # Row normal
-        self.COLOR_BORDER      = "#2c2c2e" # Hairline border
-        self.COLOR_SELECTED    = "#0071e3" # Apple System Blue
+        self.COLOR_MODAL       = "#161618"
+        self.COLOR_CARD_NORM   = "#1c1c1e"
+        self.COLOR_BORDER      = "#2c2c2e"
+        self.COLOR_SELECTED    = "#0071e3"
         self.COLOR_TEXT        = "#ffffff"
         self.COLOR_MUTED       = "#86868b"
         self.COLOR_MUTED_SEL   = "#d0e4ff"
         self.COLOR_ERROR       = "#ff453a"
         self.COLOR_SUCCESS     = "#30d158"
 
-        # Screen sizing
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
-
-        if sw >= 1920:
+        # Adaptive layout sizing
+        if self.sw >= 1920:
             self.win_w = 480
             self.win_h = 630
-            self.win_x = int(sw * 0.08)
-            self.win_y = (sh - self.win_h) // 2
+            self.target_wx = int(self.sw * 0.08)
             self.row_w = 424
             self.row_h = 56
             self.radius_card = 24
@@ -200,8 +205,7 @@ class WifiSetupApp:
         else:
             self.win_w = 420
             self.win_h = 540
-            self.win_x = int(sw * 0.06)
-            self.win_y = (sh - self.win_h) // 2
+            self.target_wx = int(self.sw * 0.06)
             self.row_w = 368
             self.row_h = 50
             self.radius_card = 20
@@ -209,20 +213,35 @@ class WifiSetupApp:
             self.sheet_w = 368
             self.sheet_h = 144
 
-        # Native Apple San Francisco typography for Tkinter widgets
+        self.hidden_wx = -(self.win_w + 60)
+        self.wifi_y = (self.sh - self.win_h) // 2
+        self.center_ax = self.sw // 2
+        self.shift_ax = self.target_wx + self.win_w + (self.sw - (self.target_wx + self.win_w)) // 2
+        self.panel_w = int(self.sw * 0.58)
+
+        # Typography
         self.f_title = (FONT_FAMILY_DISP, 17, "bold")
         self.f_sub   = (FONT_FAMILY_TEXT, 11)
         self.f_ssid  = (FONT_FAMILY_DISP, 12, "bold")
         self.f_hint  = (FONT_FAMILY_TEXT, 10)
         self.f_err   = (FONT_FAMILY_TEXT, 9)
 
-        self.root.geometry(f"{self.win_w}x{self.win_h}+{self.win_x}+{self.win_y}")
-        self.root.resizable(False, False)
+        # Base Fullscreen Canvas
+        self.canvas_root = tk.Canvas(self.root, width=self.sw, height=self.sh, bg=self.COLOR_BG, highlightthickness=0)
+        self.canvas_root.pack(fill=tk.BOTH, expand=True)
 
-        # Pre-render rounded shapes & buttons
-        self._cache_static_images()
+        # Query initial network & display information
+        self.net_type, self.ip, self.ssid = make_wallpaper.check_network_status()
+        _, _, self.monitor_name = make_wallpaper.get_display_info()
+        has_net = (self.net_type != "NONE")
 
-        # State management
+        self.current_state = "CONNECTED" if has_net else "DISCONNECTED"
+        self.cur_ax = self.center_ax if has_net else self.shift_ax
+        self.cur_wx = self.hidden_wx if has_net else self.target_wx
+        self.is_animating = False
+        self.manual_wifi_open = False
+
+        # State management for Wi-Fi
         self.networks = []
         self.selected_index = 0
         self.focused_ssid = None
@@ -233,14 +252,182 @@ class WifiSetupApp:
         self.row_widgets = []
         self.empty_widget = None
 
-        self._build_ui()
+        # Pre-render shapes & images
+        self._cache_static_images()
+
+        # 1. Place AirPlay notification panel on root canvas
+        self.photo_airplay = self.render_airplay_panel(has_net)
+        self.airplay_item = self.canvas_root.create_image(self.cur_ax, self.sh // 2, image=self.photo_airplay, anchor="center")
+
+        # 2. Place Wi-Fi modal frame on root canvas via window
+        self.wifi_frame = tk.Frame(self.canvas_root, width=self.win_w, height=self.win_h, bg=self.COLOR_BG)
+        self.wifi_window = self.canvas_root.create_window(self.cur_wx, self.wifi_y, window=self.wifi_frame, anchor="nw")
+        self._build_wifi_ui()
+
+        # Key bindings
         self._bind_keys()
 
-        # Start initial real scan in background (NO DUMMY DATA)
-        self.refresh_networks(force_rescan=True)
+        # If disconnected on boot, immediately trigger background scan
+        if not has_net:
+            self.refresh_networks(force_rescan=True)
 
-        # Start 10-second auto-scan timer
-        self.root.after(10000, self._auto_scan_loop)
+        # Start continuous network state watcher loop (every 1.5s)
+        self.root.after(1500, self._network_poll_loop)
+
+        # Start silent periodic Wi-Fi scan loop (every 12s)
+        self.root.after(12000, self._auto_scan_loop)
+
+    def render_airplay_panel(self, has_network):
+        """Renders Retina-crisp AirPlay Standby Notification Panel using Apple SF Pro fonts."""
+        SS = 2
+        W = self.panel_w * SS
+        H = self.sh * SS
+        scale = min(self.sw / 1280, self.sh / 800) * SS
+
+        img = Image.new("RGB", (W, H), color=self.COLOR_BG)
+        draw = ImageDraw.Draw(img)
+
+        try:
+            font_title = ImageFont.truetype(FONT_DISPLAY_BOLD, int(42 * scale))
+            font_label = ImageFont.truetype(FONT_TEXT_MED, int(17 * scale))
+            font_name  = ImageFont.truetype(FONT_DISPLAY_BOLD, int(20 * scale))
+            font_status= ImageFont.truetype(FONT_TEXT_MED, int(15 * scale))
+            font_inst1 = ImageFont.truetype(FONT_TEXT_REG, int(15 * scale))
+            font_inst2 = ImageFont.truetype(FONT_TEXT_REG, int(14 * scale))
+            font_hint  = ImageFont.truetype(FONT_TEXT_REG, int(11 * scale))
+        except Exception:
+            font_title = font_label = font_name = font_status = font_inst1 = font_inst2 = font_hint = ImageFont.load_default()
+
+        # AirPlay Icon
+        try:
+            icon_orig = Image.open(get_asset_file("airplay_large.png")).convert("RGBA")
+            target_icon_w = int(112 * scale)
+            ratio = target_icon_w / icon_orig.width
+            target_icon_h = int(icon_orig.height * ratio)
+            icon_img = icon_orig.resize((target_icon_w, target_icon_h), Image.Resampling.LANCZOS)
+        except Exception:
+            icon_img = Image.new("RGBA", (int(112 * scale), int(80 * scale)), (0, 113, 227, 255))
+            target_icon_w, target_icon_h = icon_img.size
+
+        center_x = W // 2
+
+        # Ambient Blue Radial Glow
+        glow_scale = 0.46 if not has_network else 0.52
+        max_r = int(min(W, H) * glow_scale)
+        rad_img = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+        rad_draw = ImageDraw.Draw(rad_img)
+        glow_alpha = 24 if not has_network else 28
+        for r in range(256, 0, -2):
+            alpha = int(glow_alpha * (1.0 - r / 256.0))
+            rad_draw.ellipse([256 - r, 256 - r, 256 + r, 256 + r], fill=(24, 42, 78, alpha))
+        rad_scaled = rad_img.resize((max_r * 2, max_r * 2), Image.Resampling.BILINEAR)
+        glow_y = int(H * (0.48 if not has_network else 0.45))
+        img.paste(rad_scaled, (center_x - max_r, glow_y - max_r), rad_scaled)
+
+        # Title
+        t_title = "AirPlay"
+        b_title = draw.textbbox((0, 0), t_title, font=font_title)
+        title_h = b_title[3] - b_title[1]
+
+        # Device Name Pill
+        lbl_txt = "Tên thiết bị: "
+        val_txt = self.monitor_name if self.monitor_name else "AirPlay Display"
+        b_lbl = draw.textbbox((0, 0), lbl_txt, font=font_label)
+        b_val = draw.textbbox((0, 0), val_txt, font=font_name)
+        pad_x, pad_y = int(24 * scale), int(12 * scale)
+        pill_w = (b_lbl[2] - b_lbl[0]) + (b_val[2] - b_val[0]) + pad_x * 2
+        pill_h = max(b_lbl[3] - b_lbl[1], b_val[3] - b_val[1]) + pad_y * 2
+
+        if has_network:
+            stat_text = "Đang chờ kết nối..."
+            stat_color = "#86868b"
+            b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
+            stat_h = b_stat[3] - b_stat[1]
+
+            gap_stat_net = int(14 * scale)
+            if self.net_type == "LAN":
+                net_text = "● Mạng dây (LAN)"
+            else:
+                net_label = f"Wi-Fi: {self.ssid}" if self.ssid else "Wi-Fi"
+                net_text = f"● {net_label} ({self.ip})"
+            b_net = draw.textbbox((0, 0), net_text, font=font_status)
+            net_h = b_net[3] - b_net[1]
+
+            inst1 = "Mở Trung tâm điều khiển trên iPhone, iPad hoặc Mac"
+            inst2 = f"Chọn \"{val_txt}\" để kết nối"
+            b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
+            b_i2 = draw.textbbox((0, 0), inst2, font=font_inst2)
+            inst_h = (b_i1[3] - b_i1[1]) + int(8 * scale) + (b_i2[3] - b_i2[1])
+
+            if getattr(self, "manual_wifi_open", False):
+                hint_txt = "Nhấn phím [Esc] trên bàn phím để đóng cài đặt Wi-Fi"
+            else:
+                hint_txt = "Nhấn phím [W] trên bàn phím để mở cài đặt Wi-Fi"
+            b_h = draw.textbbox((0, 0), hint_txt, font=font_hint)
+            hint_h = b_h[3] - b_h[1]
+
+
+            total_h = (target_icon_h + int(20 * scale) + title_h + int(24 * scale) + pill_h +
+                       int(24 * scale) + stat_h + gap_stat_net + net_h + int(22 * scale) + inst_h +
+                       int(26 * scale) + hint_h)
+        else:
+            stat_text = "● Chưa có kết nối mạng"
+            stat_color = "#ff9f0a"
+            b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
+            stat_h = b_stat[3] - b_stat[1]
+
+            inst1 = "Vui lòng chọn mạng Wi-Fi ở khung bên trái."
+            inst2 = "Dùng phím ↑ ↓ và Enter trên bàn phím để kết nối"
+            b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
+            b_i2 = draw.textbbox((0, 0), inst2, font=font_inst2)
+            inst_h = (b_i1[3] - b_i1[1]) + int(8 * scale) + (b_i2[3] - b_i2[1])
+
+            total_h = (target_icon_h + int(20 * scale) + title_h + int(24 * scale) + pill_h +
+                       int(24 * scale) + stat_h + int(22 * scale) + inst_h)
+
+        current_y = (H - total_h) // 2
+
+        # Draw Icon
+        img.paste(icon_img, (center_x - target_icon_w // 2, current_y), icon_img)
+        current_y += target_icon_h + int(20 * scale)
+
+        # Draw Title
+        draw.text((center_x - (b_title[2] - b_title[0]) // 2, current_y), t_title, fill="#f5f5f7", font=font_title)
+        current_y += title_h + int(24 * scale)
+
+        # Draw Device Name Pill
+        pill_x = center_x - pill_w // 2
+        draw.rounded_rectangle([pill_x, current_y, pill_x + pill_w, current_y + pill_h],
+                               radius=int(14 * scale), fill="#1c1c1e", outline="#323236", width=int(1.2 * scale))
+        draw.text((pill_x + pad_x, current_y + pad_y), lbl_txt, fill="#86868b", font=font_label)
+        draw.text((pill_x + pad_x + (b_lbl[2] - b_lbl[0]), current_y + pad_y), val_txt, fill="#ffffff", font=font_name)
+        current_y += pill_h + int(24 * scale)
+
+        # Draw Status
+        draw.text((center_x - (b_stat[2] - b_stat[0]) // 2, current_y), stat_text, fill=stat_color, font=font_status)
+        current_y += stat_h
+
+        # Draw Network Info or Spacing
+        if has_network:
+            current_y += gap_stat_net
+            draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill="#5e5e62", font=font_status)
+            current_y += net_h + int(22 * scale)
+        else:
+            current_y += int(22 * scale)
+
+        # Draw Instructions
+        draw.text((center_x - (b_i1[2] - b_i1[0]) // 2, current_y), inst1, fill="#86868b", font=font_inst1)
+        current_y += (b_i1[3] - b_i1[1]) + int(8 * scale)
+        draw.text((center_x - (b_i2[2] - b_i2[0]) // 2, current_y), inst2, fill="#5e5e62", font=font_inst2)
+        current_y += (b_i2[3] - b_i2[1])
+
+        # Draw Subtle Key Hint when connected
+        if has_network:
+            current_y += int(26 * scale)
+            draw.text((center_x - (b_h[2] - b_h[0]) // 2, current_y), hint_txt, fill="#3a3a3c", font=font_hint)
+
+        final_img = img.resize((self.panel_w, self.sh), Image.Resampling.LANCZOS)
+        return ImageTk.PhotoImage(final_img)
 
     def _cache_static_images(self):
         """Pre-renders reusable shapes and buttons with subpixel antialiasing."""
@@ -259,9 +446,9 @@ class WifiSetupApp:
         self.img_btn_connect    = make_pill_button(136, 34, 12, self.COLOR_SELECTED, "Kết nối (Enter)", "#ffffff", is_bold=True)
         self.img_btn_connecting = make_pill_button(136, 34, 12, self.COLOR_SELECTED, "Đang kết nối...", "#ffffff", is_bold=True)
 
-    def _build_ui(self):
-        # Base canvas covering entire window to draw rounded modal
-        self.canvas_main = tk.Canvas(self.root, width=self.win_w, height=self.win_h, bg=self.COLOR_BG, highlightthickness=0)
+    def _build_wifi_ui(self):
+        """Builds the full Apple TV styled Wi-Fi Settings UI inside self.wifi_frame."""
+        self.canvas_main = tk.Canvas(self.wifi_frame, width=self.win_w, height=self.win_h, bg=self.COLOR_BG, highlightthickness=0)
         self.canvas_main.pack(fill=tk.BOTH, expand=True)
 
         # Draw rounded modal background
@@ -298,15 +485,14 @@ class WifiSetupApp:
             "<Configure>",
             lambda e: self.canvas_list.configure(scrollregion=self.canvas_list.bbox("all"))
         )
-
         self.canvas_list.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=self.win_w - 44)
 
-        # 3. Password Sheet (Positioned cleanly at bottom)
+        # 3. Password Sheet
         sheet_y = self.win_h - (self.sheet_h + 34)
         self.cv_sheet = tk.Canvas(self.canvas_main, width=self.sheet_w, height=self.sheet_h, bg=self.COLOR_MODAL, highlightthickness=0)
         self.cv_sheet.create_image(0, 0, anchor="nw", image=self.img_sheet)
 
-        # Title Frame: Clean prefix + BOLD Wi-Fi SSID (No quotes)
+        # Title Frame: Clean prefix + BOLD Wi-Fi SSID
         self.pwd_title_frame = tk.Frame(self.cv_sheet, bg=self.COLOR_CARD_NORM)
         self.cv_sheet.create_window((16, 12), window=self.pwd_title_frame, anchor="nw")
 
@@ -329,7 +515,7 @@ class WifiSetupApp:
         )
         self.cv_input.create_window((12, 9), window=self.entry_pwd, anchor="nw", width=self.sheet_w - 56)
 
-        # Inline error/status message inside sheet
+        # Inline error/status message
         self.lbl_sheet_msg = tk.Label(self.cv_sheet, text="", font=self.f_err, bg=self.COLOR_CARD_NORM, fg=self.COLOR_ERROR)
         self.cv_sheet.create_window((16, 76), window=self.lbl_sheet_msg, anchor="nw")
 
@@ -345,33 +531,148 @@ class WifiSetupApp:
         # Sheet window ID on canvas_main (hidden initially)
         self.sheet_window_id = self.canvas_main.create_window((22, sheet_y), window=self.cv_sheet, anchor="nw", state="hidden")
 
-
     def _bind_keys(self):
         self.root.bind("<Up>", self._on_arrow_up)
         self.root.bind("<Down>", self._on_arrow_down)
         self.root.bind("<Return>", self._on_enter_key)
         self.root.bind("<Escape>", self._on_escape_key)
-        self.root.bind("<q>", lambda e: self.root.destroy() if self.password_ssid is None else None)
-        self.root.bind("<Q>", lambda e: self.root.destroy() if self.password_ssid is None else None)
+        self.root.bind("<w>", lambda e: self._toggle_wifi_manual())
+        self.root.bind("<W>", lambda e: self._toggle_wifi_manual())
         self.root.bind("<F5>", lambda e: self.refresh_networks(force_rescan=True))
         self.root.bind("<r>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
         self.root.bind("<R>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
-
+        self.root.bind("<q>", lambda e: self.root.destroy() if self.password_ssid is None else None)
+        self.root.bind("<Q>", lambda e: self.root.destroy() if self.password_ssid is None else None)
         self.root.focus_force()
 
+    def animate_to_state(self, target_state, force=False):
+        """Executes a 60 FPS cubic ease-out slide between CONNECTED and DISCONNECTED states."""
+        if self.current_state == target_state and not force and not self.is_animating:
+            return
+
+        self.current_state = target_state
+        has_net = (target_state == "CONNECTED")
+
+        # Update AirPlay panel graphics
+        self.photo_airplay = self.render_airplay_panel(has_net)
+        self.canvas_root.itemconfig(self.airplay_item, image=self.photo_airplay)
+
+        start_ax = self.cur_ax
+        start_wx = self.cur_wx
+        tgt_ax = self.center_ax if has_net else self.shift_ax
+        tgt_wx = self.hidden_wx if has_net else self.target_wx
+
+        start_time = time.time()
+        duration = 0.42  # 420ms
+        self.is_animating = True
+
+        def step():
+            now = time.time()
+            progress = (now - start_time) / duration
+            if progress >= 1.0:
+                progress = 1.0
+                self.is_animating = False
+
+            # Cubic ease-out: 1 - (1 - t)^3
+            ease = 1.0 - (1.0 - progress) ** 3
+            ax = start_ax + (tgt_ax - start_ax) * ease
+            wx = start_wx + (tgt_wx - start_wx) * ease
+
+            self.canvas_root.coords(self.airplay_item, ax, self.sh // 2)
+            self.canvas_root.coords(self.wifi_window, wx, self.wifi_y)
+            self.cur_ax = ax
+            self.cur_wx = wx
+
+            if self.is_animating:
+                self.root.after(16, step)
+            else:
+                self.cur_ax = tgt_ax
+                self.cur_wx = tgt_wx
+                if target_state == "DISCONNECTED":
+                    if self.password_ssid is not None:
+                        self.entry_pwd.focus_set()
+                    else:
+                        self.root.focus_force()
+                    if not self.networks and not self.is_scanning:
+                        self.refresh_networks(force_rescan=True)
+                else:
+                    self._dismiss_password_sheet()
+                    self.root.focus_force()
+
+        step()
+
+    def _toggle_wifi_manual(self):
+        """Allows the user to manually open/close Wi-Fi selector card via [W] key."""
+        if self.is_animating or self.password_ssid is not None:
+            return
+        if self.current_state == "CONNECTED":
+            print("[WifiKiosk] Manual [W] toggle: Opening Wi-Fi card...")
+            self.manual_wifi_open = True
+            self.animate_to_state("DISCONNECTED")
+        else:
+            print("[WifiKiosk] Manual [W] toggle: Closing Wi-Fi card...")
+            self.manual_wifi_open = False
+            if self.net_type != "NONE":
+                self.animate_to_state("CONNECTED")
+
+    def _network_poll_loop(self):
+        """Monitors network connection changes and triggers smooth slide transitions."""
+        try:
+            net_type, ip, ssid = make_wallpaper.check_network_status()
+            _, _, monitor_name = make_wallpaper.get_display_info()
+            self.monitor_name = monitor_name
+
+            prev_net_type = self.net_type
+            net_changed = (net_type != self.net_type)
+            info_changed = (ip != self.ip or ssid != self.ssid)
+            self.net_type = net_type
+            self.ip = ip
+            self.ssid = ssid
+
+            if net_type == "NONE":
+                if self.current_state != "DISCONNECTED":
+                    print("[WifiKiosk] Network connection lost! Sliding to DISCONNECTED state...")
+                    self.manual_wifi_open = False
+                    self.animate_to_state("DISCONNECTED")
+            else:
+                # Network is active (LAN or Wi-Fi)
+                if prev_net_type == "NONE" and net_type != "NONE":
+                    # Network was previously down and is now restored
+                    if self.password_ssid is None and not self.is_connecting:
+                        print(f"[WifiKiosk] Network restored ({net_type})! Sliding to CONNECTED state...")
+                        self.manual_wifi_open = False
+                        self.animate_to_state("CONNECTED")
+                elif self.current_state == "CONNECTED" and (net_changed or info_changed) and not self.is_animating:
+                    # Update active connection display (e.g. DHCP IP assigned)
+                    self.photo_airplay = self.render_airplay_panel(True)
+                    self.canvas_root.itemconfig(self.airplay_item, image=self.photo_airplay)
+        except Exception as e:
+            print("[WifiKiosk] Poller error:", e)
+
+        self.root.after(1500, self._network_poll_loop)
+
+
+    def _auto_scan_loop(self):
+        """Silently refreshes Wi-Fi scan every 12 seconds when in DISCONNECTED state."""
+        if self.current_state == "DISCONNECTED" and not self.is_connecting and not self.is_scanning:
+            self.refresh_networks(force_rescan=True, silent=True)
+        self.root.after(12000, self._auto_scan_loop)
+
     def _on_arrow_up(self, event):
-        if self.password_ssid is not None:
+        if self.current_state != "DISCONNECTED" or self.password_ssid is not None:
             return
         if self.networks and self.selected_index > 0:
             self._select_row(self.selected_index - 1)
 
     def _on_arrow_down(self, event):
-        if self.password_ssid is not None:
+        if self.current_state != "DISCONNECTED" or self.password_ssid is not None:
             return
         if self.networks and self.selected_index < len(self.networks) - 1:
             self._select_row(self.selected_index + 1)
 
     def _on_enter_key(self, event):
+        if self.current_state != "DISCONNECTED":
+            return
         if self.password_ssid is not None:
             self._do_connect()
         else:
@@ -390,13 +691,14 @@ class WifiSetupApp:
     def _on_escape_key(self, event):
         if self.password_ssid is not None:
             self._dismiss_password_sheet()
-        else:
-            self.root.destroy()
+        elif self.current_state == "DISCONNECTED" and self.net_type != "NONE":
+            self.manual_wifi_open = False
+            self.animate_to_state("CONNECTED")
+
 
     def _select_row(self, index):
         if not self.networks or index < 0 or index >= len(self.networks):
             return
-        
         self.selected_index = index
         self.focused_ssid = self.networks[index]["ssid"]
 
@@ -429,74 +731,44 @@ class WifiSetupApp:
         self.lbl_sheet_msg.config(text="")
         self.root.focus_force()
 
-    def _auto_scan_loop(self):
-        """Runs silently every 10 seconds without interrupting user input or jumping selection."""
-        # Check if network became active (e.g. Ethernet plugged in or Wi-Fi connected)
-        try:
-            import make_wallpaper
-            net_type, _, _ = make_wallpaper.check_network_status()
-            if net_type != "NONE":
-                print(f"[WifiGUI] Network is active ({net_type}). Auto-closing Wi-Fi GUI...")
-                self.root.destroy()
-                return
-        except Exception:
-            pass
-
-        if not self.is_connecting:
-            self.refresh_networks(force_rescan=True, silent=True)
-        self.root.after(10000, self._auto_scan_loop)
-
     def refresh_networks(self, force_rescan=False, silent=False):
         if self.is_scanning:
             return
         self.is_scanning = True
         if not silent:
-            self.lbl_scanning.config(text="Đang tìm kiếm mạng Wi-Fi...")
+            self.lbl_scanning.config(text="Đang tìm...")
 
         def _worker():
-            # 1. Check if hardware Wi-Fi card exists
+            fresh_list = []
             has_wifi_dev = False
             try:
-                dev_out = subprocess.check_output("nmcli -t -f TYPE dev status 2>/dev/null", shell=True).decode()
+                dev_out = subprocess.check_output("nmcli -t -f DEVICE,TYPE,STATE dev 2>/dev/null", shell=True).decode()
                 for line in dev_out.splitlines():
-                    if line.strip() == "wifi":
+                    parts = line.split(":")
+                    if len(parts) >= 2 and parts[1] == "wifi":
                         has_wifi_dev = True
                         break
             except Exception:
                 pass
 
-            fresh_list = []
             if has_wifi_dev:
                 try:
-                    subprocess.run("sudo rfkill unblock wifi 2>/dev/null", shell=True)
-                    subprocess.run("sudo nmcli radio wifi on 2>/dev/null", shell=True)
                     if force_rescan:
-                        subprocess.run("sudo nmcli dev wifi rescan 2>/dev/null", shell=True)
+                        subprocess.run("sudo nmcli dev wifi rescan 2>/dev/null", shell=True, timeout=5)
                 except Exception:
                     pass
 
                 try:
-                    out = subprocess.check_output(
-                        "sudo nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null", shell=True
-                    ).decode()
+                    out = subprocess.check_output("sudo nmcli -t -f IN-USE,BSSID,SSID,SIGNAL,SECURITY dev wifi list 2>/dev/null", shell=True).decode()
                     seen = set()
                     for line in out.splitlines():
-                        if not line.strip():
+                        parts = line.split(":")
+                        if len(parts) < 5:
                             continue
-                        safe_line = line.replace(r"\:", "__COLON__")
-                        parts = safe_line.split(":")
-                        if len(parts) >= 4:
-                            in_use = (parts[0].strip() == "*")
-                            ssid = parts[1].replace("__COLON__", ":").strip()
-                            sig = parts[2].strip()
-                            sec = parts[3].replace("__COLON__", ":").strip()
-                        elif len(parts) >= 3:
-                            in_use = False
-                            ssid = parts[0].replace("__COLON__", ":").strip()
-                            sig = parts[1].strip()
-                            sec = parts[2].replace("__COLON__", ":").strip()
-                        else:
-                            continue
+                        in_use = (parts[0] == "*")
+                        sec = parts[-1].strip()
+                        sig = parts[-2].strip()
+                        ssid = ":".join(parts[2:-2]).strip()
 
                         if not ssid or ssid == "--" or ssid in seen:
                             continue
@@ -513,9 +785,9 @@ class WifiSetupApp:
                         })
                     fresh_list.sort(key=lambda x: (x.get("in_use", False), x.get("signal", 0)), reverse=True)
                 except Exception as e:
-                    print("[WiFi Scan Error]:", e)
+                    print("[WifiKiosk Scan Error]:", e)
 
-            # Strictly REAL data: absolutely NO dummy fallback!
+            # Strictly REAL data - NO dummy fallback!
             self.root.after(0, lambda: self._apply_network_data(fresh_list, has_wifi_dev))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -526,7 +798,6 @@ class WifiSetupApp:
         self.lbl_scanning.config(text="")
 
         target_ssid = self.password_ssid if self.password_ssid else self.focused_ssid
-
         self.networks = new_list
 
         for r in self.row_widgets:
@@ -566,13 +837,12 @@ class WifiSetupApp:
             else:
                 new_index = min(self.selected_index, len(self.networks) - 1)
 
-        # Build floating rounded pill rows with pre-rendered Retina-sharp images
+        # Build floating rounded pill rows
         for i, net in enumerate(self.networks):
             cv_row = tk.Canvas(self.scrollable_frame, width=self.row_w, height=self.row_h,
                                bg=self.COLOR_MODAL, highlightthickness=0, cursor="hand2")
             cv_row.pack(pady=4)
 
-            # Pre-render both states with Pillow using Apple SF Pro fonts & SF Symbols
             p_norm = render_row_image(self.row_w, self.row_h, self.radius_row, net, False)
             p_sel  = render_row_image(self.row_w, self.row_h, self.radius_row, net, True)
 
@@ -592,13 +862,14 @@ class WifiSetupApp:
 
         self._select_row(new_index)
 
-        # CRITICAL: Keep typing cursor inside password entry if user is currently entering password!
         if self.password_ssid is not None:
             self.entry_pwd.focus_set()
         else:
             self.root.focus_force()
 
     def _on_row_click(self, index):
+        if self.current_state != "DISCONNECTED":
+            return
         self._select_row(index)
         net = self.networks[index]
         sec = net.get("security", "")
@@ -628,9 +899,9 @@ class WifiSetupApp:
 
         def _connect_thread():
             if is_secure:
-                cmd = f'sudo nmcli dev wifi connect "{ssid}" password "{pwd}"'
+                cmd = f"sudo nmcli dev wifi connect \"{ssid}\" password \"{pwd}\""
             else:
-                cmd = f'sudo nmcli dev wifi connect "{ssid}"'
+                cmd = f"sudo nmcli dev wifi connect \"{ssid}\""
 
             res = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             self.root.after(0, lambda: self._handle_connect_result(res.returncode, res.stdout, res.stderr, ssid))
@@ -643,7 +914,14 @@ class WifiSetupApp:
 
         if code == 0:
             self.lbl_sheet_msg.config(text=f"✓ Đã kết nối thành công tới {ssid}!", fg=self.COLOR_SUCCESS)
-            self.root.after(1200, self.root.destroy)
+            # Smoothly transition to CONNECTED after 1200ms
+            def _finish():
+                self.net_type, self.ip, self.ssid = make_wallpaper.check_network_status()
+                self._dismiss_password_sheet()
+                self.manual_wifi_open = False
+                self.animate_to_state("CONNECTED")
+            self.root.after(1200, _finish)
+
         else:
             err = stderr.strip() or stdout.strip() or "Không thể kết nối"
             if "Secret" in err or "password" in err.lower():
@@ -654,20 +932,9 @@ class WifiSetupApp:
             self.entry_pwd.focus_set()
 
 def main():
-    # Defensive check: if network is already connected (LAN or Wi-Fi), do not open Wi-Fi GUI!
-    if '--force' not in sys.argv:
-        try:
-            import make_wallpaper
-            net_type, _, _ = make_wallpaper.check_network_status()
-            if net_type != "NONE":
-                print(f"[WifiGUI] Network is already active ({net_type}). No setup required, exiting.")
-                sys.exit(0)
-        except Exception:
-            pass
-
     root = tk.Tk(className="WifiKiosk")
-    app = WifiSetupApp(root)
+    app = WifiKioskApp(root)
     root.mainloop()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
