@@ -1,9 +1,37 @@
-import os, sys, subprocess, re, time, threading
+import os, sys, subprocess, re, time, threading, math
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, "/opt/airplay")
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 import make_wallpaper
+
+class AppleSpring:
+    """
+    Apple SwiftUI / CoreAnimation standard damped harmonic spring physics solver.
+    Implements exact differential equation: d^2x/dt^2 + 2*zeta*omega_n*dx/dt + omega_n^2*x = 0
+    Direct counterpart of SwiftUI .spring(response, dampingRatio).
+    """
+    def __init__(self, response=0.44, damping_ratio=0.88, initial_velocity=0.0):
+        self.response = max(0.01, response)
+        self.zeta = damping_ratio
+        self.omega_n = (2 * math.pi) / self.response
+        self.omega_d = self.omega_n * math.sqrt(max(0.0001, 1.0 - self.zeta * self.zeta))
+        self.v0 = initial_velocity
+        self.duration = self.response * (1.6 if self.zeta < 0.9 else 1.3)
+
+    def solve(self, t):
+        if t <= 0:
+            return 0.0, self.v0
+        if t >= self.duration:
+            return 1.0, 0.0
+        decay = math.exp(-self.zeta * self.omega_n * t)
+        c = math.cos(self.omega_d * t)
+        s = math.sin(self.omega_d * t)
+        k = (self.zeta * self.omega_n - self.v0) / self.omega_d
+        val = 1.0 - decay * (c + k * s)
+        vel = decay * (self.v0 * c + ((self.omega_n**2 - self.zeta * self.omega_n * self.v0) / self.omega_d) * s)
+        return val, vel
+
 
 FONT_FAMILY_DISP = "SF Pro Display"
 FONT_FAMILY_TEXT = "SF Pro Text"
@@ -277,8 +305,8 @@ class WifiKioskApp:
         # Start silent periodic Wi-Fi scan loop (every 12s)
         self.root.after(12000, self._auto_scan_loop)
 
-    def render_airplay_panel(self, has_network):
-        """Renders Retina-crisp AirPlay Standby Notification Panel using Apple SF Pro fonts."""
+    def _render_panel_image(self, has_network):
+        """Renders raw PIL Image for AirPlay Standby Notification Panel with 2x supersampling."""
         SS = 2
         W = self.panel_w * SS
         H = self.sh * SS
@@ -286,6 +314,7 @@ class WifiKioskApp:
 
         img = Image.new("RGB", (W, H), color=self.COLOR_BG)
         draw = ImageDraw.Draw(img)
+
 
         try:
             font_title = ImageFont.truetype(FONT_DISPLAY_BOLD, int(42 * scale))
@@ -426,8 +455,28 @@ class WifiKioskApp:
             current_y += int(26 * scale)
             draw.text((center_x - (b_h[2] - b_h[0]) // 2, current_y), hint_txt, fill="#3a3a3c", font=font_hint)
 
+        return img
+
+    def render_airplay_panel(self, has_network):
+        """Returns PhotoImage for AirPlay Standby Notification Panel."""
+        img = self._render_panel_image(has_network)
         final_img = img.resize((self.panel_w, self.sh), Image.Resampling.LANCZOS)
         return ImageTk.PhotoImage(final_img)
+
+    def _prepare_transition_textures(self):
+        """Pre-computes Apple-style crossfade morphing textures between states."""
+        try:
+            img_c = self._render_panel_image(has_network=True)
+            img_d = self._render_panel_image(has_network=False)
+            self.crossfade_photos = []
+            for step in range(11):
+                alpha = step / 10.0
+                blended = Image.blend(img_c, img_d, alpha)
+                res = blended.resize((self.panel_w, self.sh), Image.Resampling.LANCZOS)
+                self.crossfade_photos.append(ImageTk.PhotoImage(res))
+        except Exception as e:
+            print("[WifiKiosk] Crossfade texture error:", e)
+
 
     def _cache_static_images(self):
         """Pre-renders reusable shapes and buttons with subpixel antialiasing."""
@@ -488,7 +537,8 @@ class WifiKioskApp:
         self.canvas_list.create_window((0, 0), window=self.scrollable_frame, anchor="nw", width=self.win_w - 44)
 
         # 3. Password Sheet
-        sheet_y = self.win_h - (self.sheet_h + 34)
+        self.sheet_target_y = self.win_h - (self.sheet_h + 34)
+        self.sheet_animating = False
         self.cv_sheet = tk.Canvas(self.canvas_main, width=self.sheet_w, height=self.sheet_h, bg=self.COLOR_MODAL, highlightthickness=0)
         self.cv_sheet.create_image(0, 0, anchor="nw", image=self.img_sheet)
 
@@ -528,8 +578,9 @@ class WifiKioskApp:
         self.cv_sheet.create_window((self.sheet_w - 152, 98), window=self.btn_connect, anchor="nw")
         self.btn_connect.bind("<Button-1>", lambda e: self._do_connect())
 
-        # Sheet window ID on canvas_main (hidden initially)
-        self.sheet_window_id = self.canvas_main.create_window((22, sheet_y), window=self.cv_sheet, anchor="nw", state="hidden")
+        # Sheet window ID on canvas_main (hidden initially, offset by 45px below for spring entrance)
+        self.sheet_window_id = self.canvas_main.create_window((22, self.sheet_target_y + 45), window=self.cv_sheet, anchor="nw", state="hidden")
+
 
     def _bind_keys(self):
         self.root.bind("<Up>", self._on_arrow_up)
@@ -546,48 +597,75 @@ class WifiKioskApp:
         self.root.focus_force()
 
     def animate_to_state(self, target_state, force=False):
-        """Executes a 60 FPS cubic ease-out slide between CONNECTED and DISCONNECTED states."""
+        """Executes genuine Apple Spring physics slide with velocity inheritance and crossfade morphing."""
         if self.current_state == target_state and not force and not self.is_animating:
             return
 
         self.current_state = target_state
         has_net = (target_state == "CONNECTED")
 
-        # Update AirPlay panel graphics
-        self.photo_airplay = self.render_airplay_panel(has_net)
-        self.canvas_root.itemconfig(self.airplay_item, image=self.photo_airplay)
-
         start_ax = self.cur_ax
         start_wx = self.cur_wx
         tgt_ax = self.center_ax if has_net else self.shift_ax
         tgt_wx = self.hidden_wx if has_net else self.target_wx
 
+        # Calculate normalized initial velocity if interrupted mid-spring
+        v0_norm = 0.0
+        dist = tgt_ax - start_ax
+        if self.is_animating and hasattr(self, "cur_vel_ax") and abs(dist) > 2.0:
+            v0_norm = self.cur_vel_ax / dist
+
+        # Apple Spring calibrated to Apple TV modal presentation
+        spring = AppleSpring(response=0.44, damping_ratio=0.88, initial_velocity=v0_norm)
         start_time = time.time()
-        duration = 0.42  # 420ms
         self.is_animating = True
+
+        # Pre-compute crossfade table for smooth texture morphing
+        self._prepare_transition_textures()
+
+        # From which texture direction (0.0 is Connected, 1.0 is Disconnected)
+        span = float(self.shift_ax - self.center_ax)
+        if span > 0:
+            start_alpha = (start_ax - self.center_ax) / span
+        else:
+            start_alpha = 0.0
+        start_alpha = max(0.0, min(1.0, start_alpha))
+        target_alpha = 0.0 if has_net else 1.0
 
         def step():
             now = time.time()
-            progress = (now - start_time) / duration
-            if progress >= 1.0:
-                progress = 1.0
-                self.is_animating = False
+            t = now - start_time
+            val, vel = spring.solve(t)
 
-            # Cubic ease-out: 1 - (1 - t)^3
-            ease = 1.0 - (1.0 - progress) ** 3
-            ax = start_ax + (tgt_ax - start_ax) * ease
-            wx = start_wx + (tgt_wx - start_wx) * ease
+            ax = start_ax + (tgt_ax - start_ax) * val
+            wx = start_wx + (tgt_wx - start_wx) * val
+            self.cur_vel_ax = (tgt_ax - start_ax) * vel
 
             self.canvas_root.coords(self.airplay_item, ax, self.sh // 2)
             self.canvas_root.coords(self.wifi_window, wx, self.wifi_y)
             self.cur_ax = ax
             self.cur_wx = wx
 
-            if self.is_animating:
+            # Apple Crossfade Morphing across spring motion
+            interp_alpha = start_alpha + (target_alpha - start_alpha) * min(1.0, max(0.0, val))
+            idx = int(round(min(1.0, max(0.0, interp_alpha)) * 10))
+            if hasattr(self, "crossfade_photos") and self.crossfade_photos and 0 <= idx < len(self.crossfade_photos):
+                self.canvas_root.itemconfig(self.airplay_item, image=self.crossfade_photos[idx])
+
+            if t < spring.duration:
                 self.root.after(16, step)
             else:
+                self.is_animating = False
                 self.cur_ax = tgt_ax
                 self.cur_wx = tgt_wx
+                self.cur_vel_ax = 0.0
+                self.canvas_root.coords(self.airplay_item, tgt_ax, self.sh // 2)
+                self.canvas_root.coords(self.wifi_window, tgt_wx, self.wifi_y)
+
+                final_idx = 0 if has_net else 10
+                if hasattr(self, "crossfade_photos") and self.crossfade_photos and 0 <= final_idx < len(self.crossfade_photos):
+                    self.canvas_root.itemconfig(self.airplay_item, image=self.crossfade_photos[final_idx])
+
                 if target_state == "DISCONNECTED":
                     if self.password_ssid is not None:
                         self.entry_pwd.focus_set()
@@ -600,6 +678,7 @@ class WifiKioskApp:
                     self.root.focus_force()
 
         step()
+
 
     def _toggle_wifi_manual(self):
         """Allows the user to manually open/close Wi-Fi selector card via [W] key."""
@@ -710,26 +789,93 @@ class WifiKioskApp:
         self._ensure_visible(index)
 
     def _ensure_visible(self, index):
+        """Apple TV style smooth focus scrolling for network list."""
         total = len(self.networks)
         if total <= 1:
             return
-        target_frac = index / total
-        self.canvas_list.yview_moveto(max(0.0, target_frac - 0.15))
+        target_frac = max(0.0, min(1.0, (index / total) - 0.15))
+        try:
+            current_frac = self.canvas_list.yview()[0]
+        except Exception:
+            current_frac = 0.0
+
+        if abs(target_frac - current_frac) < 0.01:
+            return
+
+        spring = AppleSpring(response=0.24, damping_ratio=0.86)
+        start_time = time.time()
+
+        def _step():
+            t = time.time() - start_time
+            val, _ = spring.solve(t)
+            frac = current_frac + (target_frac - current_frac) * val
+            self.canvas_list.yview_moveto(frac)
+            if t < spring.duration:
+                self.root.after(16, _step)
+            else:
+                self.canvas_list.yview_moveto(target_frac)
+
+        _step()
 
     def _show_password_sheet(self, net):
+        """Apple TV modal bottom sheet entrance animation with spring physics."""
+        if getattr(self, "sheet_animating", False):
+            return
         self.password_ssid = net["ssid"]
         self.lbl_pwd_ssid.config(text=net["ssid"])
         self.entry_pwd.delete(0, tk.END)
         self.lbl_sheet_msg.config(text="")
+
+        start_y = self.sheet_target_y + 45
+        self.canvas_main.coords(self.sheet_window_id, 22, start_y)
         self.canvas_main.itemconfigure(self.sheet_window_id, state="normal")
         self.canvas_main.tag_raise(self.sheet_window_id)
-        self.entry_pwd.focus_set()
+
+        spring = AppleSpring(response=0.34, damping_ratio=0.84)
+        start_time = time.time()
+        self.sheet_animating = True
+
+        def _step():
+            t = time.time() - start_time
+            val, _ = spring.solve(t)
+            cur_y = start_y + (self.sheet_target_y - start_y) * val
+            self.canvas_main.coords(self.sheet_window_id, 22, cur_y)
+            if t < spring.duration:
+                self.root.after(16, _step)
+            else:
+                self.canvas_main.coords(self.sheet_window_id, 22, self.sheet_target_y)
+                self.sheet_animating = False
+                self.entry_pwd.focus_set()
+
+        _step()
 
     def _dismiss_password_sheet(self):
+        """Apple TV modal bottom sheet dismissal animation with spring physics."""
+        if getattr(self, "sheet_animating", False) or self.sheet_window_id is None or self.password_ssid is None:
+            return
         self.password_ssid = None
-        self.canvas_main.itemconfigure(self.sheet_window_id, state="hidden")
-        self.lbl_sheet_msg.config(text="")
-        self.root.focus_force()
+        start_y = self.sheet_target_y
+        target_y = self.sheet_target_y + 45
+        spring = AppleSpring(response=0.28, damping_ratio=0.90)
+        start_time = time.time()
+        self.sheet_animating = True
+
+        def _step():
+            t = time.time() - start_time
+            val, _ = spring.solve(t)
+            cur_y = start_y + (target_y - start_y) * val
+            self.canvas_main.coords(self.sheet_window_id, 22, cur_y)
+            if t < spring.duration:
+                self.root.after(16, _step)
+            else:
+                self.canvas_main.coords(self.sheet_window_id, 22, target_y)
+                self.canvas_main.itemconfigure(self.sheet_window_id, state="hidden")
+                self.lbl_sheet_msg.config(text="")
+                self.sheet_animating = False
+                self.root.focus_force()
+
+        _step()
+
 
     def refresh_networks(self, force_rescan=False, silent=False):
         if self.is_scanning:
