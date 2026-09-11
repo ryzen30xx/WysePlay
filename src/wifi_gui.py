@@ -305,6 +305,10 @@ class WifiKioskApp:
         # Start silent periodic Wi-Fi scan loop (every 12s)
         self.root.after(12000, self._auto_scan_loop)
 
+        # Monitor active streaming state to withdraw/restore window instantly
+        self.is_withdrawn_for_stream = False
+        self.root.after(200, self._streaming_check_loop)
+
     def _render_panel_image(self, has_network):
         """Renders raw PIL Image for AirPlay Standby Notification Panel with 2x supersampling."""
         SS = 2
@@ -757,6 +761,22 @@ class WifiKioskApp:
         if self.current_state == "DISCONNECTED" and not self.is_connecting and not self.is_scanning:
             self.refresh_networks(force_rescan=True, silent=True)
         self.root.after(12000, self._auto_scan_loop)
+
+    def _streaming_check_loop(self):
+        """Monitors /tmp/airplay_streaming and withdraws/restores UI during active stream."""
+        try:
+            is_streaming = os.path.exists("/tmp/airplay_streaming")
+            if is_streaming and not getattr(self, "is_withdrawn_for_stream", False):
+                self.is_withdrawn_for_stream = True
+                self.root.withdraw()
+            elif not is_streaming and getattr(self, "is_withdrawn_for_stream", False):
+                self.is_withdrawn_for_stream = False
+                self.root.deiconify()
+                self.root.attributes("-fullscreen", True)
+                self.root.lift()
+        except Exception:
+            pass
+        self.root.after(200, self._streaming_check_loop)
 
     def _on_arrow_up(self, event):
         if self.current_state != "DISCONNECTED" or self.password_ssid is not None:

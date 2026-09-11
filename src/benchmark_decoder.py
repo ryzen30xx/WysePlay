@@ -393,7 +393,7 @@ def benchmark_hardware():
         "decoder": chosen_decoder,
         "decoder_h264": dec_h264,
         "decoder_h265": dec_h265,
-        "video_sink": "ximagesink",
+        "video_sink": "autovideosink",
         "benchmarks": results,
         "selected_profile": selected
     }
@@ -422,7 +422,7 @@ def fallback_profile(cpu):
         "decoder": "avdec_h265" if h265 else "avdec_h264",
         "decoder_h264": "avdec_h264",
         "decoder_h265": "avdec_h265",
-        "video_sink": "ximagesink",
+        "video_sink": "autovideosink",
         "benchmarks": {},
         "selected_profile": {
             "resolution": res,
@@ -456,7 +456,7 @@ def save_profile(profile_data, json_path=DEFAULT_CONFIG_PATH, etc_path=ETC_CONFI
             f"WYSEPLAY_MAX_FPS={sp['max_fps']}",
             f"WYSEPLAY_H265={'true' if sp.get('h265') else 'false'}",
             f"WYSEPLAY_DECODER={profile_data.get('decoder', 'avdec_h264')}",
-            f"WYSEPLAY_VIDEOSINK={profile_data.get('video_sink', 'ximagesink')}",
+            f"WYSEPLAY_VIDEOSINK={profile_data.get('video_sink', 'autovideosink')}",
             f"WYSEPLAY_TIER=\"{sp['tier']}\"",
             ""
         ]

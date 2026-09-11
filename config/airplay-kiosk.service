@@ -16,6 +16,9 @@ ExecStartPre=/bin/sh -c "systemctl stop getty@tty1.service || true"
 ExecStart=/usr/bin/xinit /opt/airplay/start_kiosk.sh -- :0 vt1 -nocursor
 Restart=always
 RestartSec=3
+TimeoutStopSec=5
+KillMode=mixed
+ExecStopPost=/bin/sh -c "pkill -9 -f 'start_kiosk|kiosk_manager|wifi_gui|uxplay' 2>/dev/null || true"
 
 [Install]
 WantedBy=multi-user.target

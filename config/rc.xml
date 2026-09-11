@@ -78,6 +78,60 @@
       <focus>yes</focus>
       <layer>above</layer>
     </application>
+    <application class="*uxplay*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application class="*GStreamer*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application class="*gstreamer*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application class="*ximagesink*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application name="*ximagesink*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application class="*xvimagesink*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application name="*xvimagesink*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application class="*glimagesink*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
+    <application name="*glimagesink*">
+      <decor>no</decor>
+      <fullscreen>yes</fullscreen>
+      <focus>yes</focus>
+      <layer>above</layer>
+    </application>
     <application class="WifiKiosk">
       <decor>no</decor>
       <fullscreen>yes</fullscreen>
