@@ -367,6 +367,7 @@ def main():
             '-reset', '3',
             '-nofreeze',
             '-vs', video_sink,
+            '-vsync', 'no',
             '-d'
         ] + extra_flags
 
