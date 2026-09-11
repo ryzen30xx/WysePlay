@@ -349,6 +349,8 @@ class WifiSetupApp:
         self.root.bind("<Down>", self._on_arrow_down)
         self.root.bind("<Return>", self._on_enter_key)
         self.root.bind("<Escape>", self._on_escape_key)
+        self.root.bind("<q>", lambda e: self.root.destroy() if self.password_ssid is None else None)
+        self.root.bind("<Q>", lambda e: self.root.destroy() if self.password_ssid is None else None)
         self.root.bind("<F5>", lambda e: self.refresh_networks(force_rescan=True))
         self.root.bind("<r>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
         self.root.bind("<R>", lambda e: self.refresh_networks(force_rescan=True) if self.password_ssid is None else None)
@@ -386,6 +388,8 @@ class WifiSetupApp:
     def _on_escape_key(self, event):
         if self.password_ssid is not None:
             self._dismiss_password_sheet()
+        else:
+            self.root.destroy()
 
     def _select_row(self, index):
         if not self.networks or index < 0 or index >= len(self.networks):

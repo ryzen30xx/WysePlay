@@ -17,6 +17,7 @@ CURRENT_PROC = None
 WIFI_GUI_PROC = None
 CURRENT_DISPLAY = None
 CURRENT_NET_TYPE = None
+CURRENT_WIFI_GUI_ACTIVE = None
 STATE_LOCK = threading.Lock()
 
 def set_inputs(locked: bool):
@@ -68,7 +69,7 @@ def has_active_video_window():
     return False
 
 def manage_wifi_gui():
-    global WIFI_GUI_PROC, CURRENT_NET_TYPE
+    global WIFI_GUI_PROC, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
     with STATE_LOCK:
         if CURRENT_NET_TYPE == "NONE":
             # Need wifi setup GUI
@@ -76,6 +77,9 @@ def manage_wifi_gui():
                 print("[Kiosk] No network: Launching interactive Wi-Fi Setup GUI...")
                 env = dict(os.environ, DISPLAY=":0")
                 WIFI_GUI_PROC = subprocess.Popen(["python3", "/opt/airplay/wifi_gui.py"], env=env)
+                CURRENT_WIFI_GUI_ACTIVE = True
+                make_wallpaper.generate_wallpaper(wifi_gui_showing=True)
+                subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
         else:
             # Connected to LAN or Wi-Fi -> close wifi setup GUI
             if WIFI_GUI_PROC is not None and WIFI_GUI_PROC.poll() is None:
@@ -87,6 +91,9 @@ def manage_wifi_gui():
                     if WIFI_GUI_PROC and WIFI_GUI_PROC.poll() is None:
                         WIFI_GUI_PROC.kill()
                 WIFI_GUI_PROC = None
+                CURRENT_WIFI_GUI_ACTIVE = False
+                make_wallpaper.generate_wallpaper(wifi_gui_showing=False)
+                subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
 
 def get_uxplay_tcp_connections(pid):
     """
@@ -214,7 +221,7 @@ def restart_uxplay_for_display(new_display_info):
 def hotplug_and_network_watcher():
     """Watches for display hotplug (via udev/DRM + RandR polling) and network state changes."""
     def _watch():
-        global CURRENT_DISPLAY, CURRENT_NET_TYPE
+        global CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
 
         udev_monitor = None
         if HAS_PYUDEV:
@@ -250,6 +257,19 @@ def hotplug_and_network_watcher():
             except Exception as e:
                 print("[Network] Watcher error:", e)
 
+            # 1b. Check Wi-Fi GUI active state changes
+            try:
+                wifi_active = make_wallpaper.is_wifi_gui_active()
+                if CURRENT_WIFI_GUI_ACTIVE is not None and wifi_active != CURRENT_WIFI_GUI_ACTIVE:
+                    print(f"[Kiosk] Wi-Fi GUI visibility changed: {CURRENT_WIFI_GUI_ACTIVE} -> {wifi_active}")
+                    CURRENT_WIFI_GUI_ACTIVE = wifi_active
+                    make_wallpaper.generate_wallpaper(wifi_gui_showing=wifi_active)
+                    subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+                elif CURRENT_WIFI_GUI_ACTIVE is None:
+                    CURRENT_WIFI_GUI_ACTIVE = wifi_active
+            except Exception as e:
+                pass
+
             # 2. Check Display changes
             try:
                 display_connected = is_physical_display_connected()
@@ -280,7 +300,7 @@ def hotplug_and_network_watcher():
     t.start()
 
 def main():
-    global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE
+    global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
     os.environ['DISPLAY'] = ':0'
 
     # Clear root screen and configure DPMS monitor sleep (30s idle, wakes on stream)
@@ -294,8 +314,9 @@ def main():
     subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
     time.sleep(0.5)
 
-    # Initial Network status
+    # Initial Network and Wi-Fi GUI status
     CURRENT_NET_TYPE, _, _ = make_wallpaper.check_network_status()
+    CURRENT_WIFI_GUI_ACTIVE = make_wallpaper.is_wifi_gui_active()
 
     # Start background watcher threads
     window_watcher()
