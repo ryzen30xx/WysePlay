@@ -395,7 +395,7 @@ def main():
             '-nohold',
             '-fs',
             '-p',
-            '-s', f'{target_res}@{target_fps}',
+            '-s', f'{target_res}@60',
             '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
