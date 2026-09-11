@@ -337,6 +337,7 @@ def main():
         profile = load_hardware_profile()
         target_res = "1920x1080"
         target_fps = 60
+        target_h265 = False
         decoder = "avdec_h264"
         video_sink = "ximagesink"
 
@@ -344,22 +345,23 @@ def main():
             sp = profile["selected_profile"]
             target_res = sp.get("resolution", "1920x1080")
             target_fps = sp.get("max_fps", 60)
+            target_h265 = sp.get("h265", False)
             decoder = profile.get("decoder", "avdec_h264")
             video_sink = profile.get("video_sink", "ximagesink")
-            print(f"[Kiosk] Benchmark Profile active: {sp.get('tier', 'Custom')} -> Stream: {target_res}@{target_fps}fps (Decoder: {decoder}, Sink: {video_sink})")
+            print(f"[Kiosk] Benchmark Profile active: {sp.get('tier', 'Custom')} -> Stream: {target_res}@{target_fps}fps (H.265: {target_h265}, Decoder: {decoder}, Sink: {video_sink})")
         else:
             print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps")
 
-        # Check for 4K
+        # Check for 4K / H.265
         extra_flags = []
         try:
             w = int(target_res.split('x')[0])
-            if w >= 3840:
+            if target_h265 or w >= 3840:
                 extra_flags.append('-h265')
         except Exception:
             pass
 
-        if decoder and decoder != 'avdec_h264':
+        if decoder and decoder not in ('avdec_h264', 'avdec_h265'):
             extra_flags.extend(['-vd', decoder])
 
         cmd = [

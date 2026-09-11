@@ -445,7 +445,8 @@ try:
     with open('/opt/airplay/hw_profile.json') as f:
         d = json.load(f)
         sp = d.get('selected_profile', {})
-        print(f\"{sp.get('tier', 'Custom')} ({sp.get('resolution', '')} @ {sp.get('max_fps', 60)}fps, {d.get('decoder', 'avdec_h264')})\")
+        codec = 'H.265' if sp.get('h265') else 'H.264'
+        print(f\"{sp.get('tier', 'Custom')} ({sp.get('resolution', '')} @ {sp.get('max_fps', 60)}fps, {codec}, {d.get('decoder', 'avdec')})\")
 except Exception:
     pass
 " 2>/dev/null || true)
