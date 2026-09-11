@@ -332,31 +332,23 @@ def main():
         # Apply wallpaper
         subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
 
-        # 2. Apply hardware profile constraints (resolution & FPS clamped by decoder benchmark)
+        # 2. UxPlay streaming parameters are STRICTLY determined by hardware benchmark profile
+        # (Independent of the connected display, preventing downgraded performance from inferior setup monitors)
         profile = load_hardware_profile()
-        target_res = res
-        target_fps = rate
+        target_res = "1920x1080"
+        target_fps = 60
         decoder = "avdec_h264"
         video_sink = "ximagesink"
 
         if profile and "selected_profile" in profile:
             sp = profile["selected_profile"]
-            prof_w = sp.get("width", 1920)
-            prof_h = sp.get("height", 1080)
-            prof_fps = sp.get("max_fps", 60)
+            target_res = sp.get("resolution", "1920x1080")
+            target_fps = sp.get("max_fps", 60)
             decoder = profile.get("decoder", "avdec_h264")
             video_sink = profile.get("video_sink", "ximagesink")
-
-            try:
-                disp_w, disp_h = [int(x) for x in res.split('x')]
-                stream_w = min(disp_w, prof_w)
-                stream_h = min(disp_h, prof_h)
-                target_res = f"{stream_w}x{stream_h}"
-            except Exception:
-                target_res = sp.get("resolution", "1920x1080")
-
-            target_fps = min(int(rate), int(prof_fps))
-            print(f"[Kiosk] Hardware Profile active: {sp.get('tier', 'Custom')} (Decoder: {decoder}, Sink: {video_sink})")
+            print(f"[Kiosk] Benchmark Profile active: {sp.get('tier', 'Custom')} -> Stream: {target_res}@{target_fps}fps (Decoder: {decoder}, Sink: {video_sink})")
+        else:
+            print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps")
 
         # Check for 4K
         extra_flags = []
