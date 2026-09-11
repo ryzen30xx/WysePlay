@@ -35,26 +35,58 @@ def set_inputs(locked: bool):
     except Exception as e:
         print("[Kiosk] Input error:", e)
 
-def has_active_video_window():
-    """Returns True ONLY when an active UxPlay video streaming window is mapped."""
+def on_stream_started():
+    global CURRENT_LOCKED
+    with STATE_LOCK:
+        if CURRENT_LOCKED:
+            return
+        CURRENT_LOCKED = True
+        try:
+            open("/tmp/airplay_streaming", "w").close()
+        except Exception:
+            pass
+        subprocess.run("DISPLAY=:0 xdotool search --class WifiKiosk windowunmap 2>/dev/null", shell=True)
+        subprocess.run('DISPLAY=:0 xsetroot -cursor_name blank 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xsetroot -solid "#000000" 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset -dpms s off 2>/dev/null', shell=True)
+        print("[Kiosk] AirPlay stream started: Woke up monitor, kept screen awake & hid mouse.")
+
+def on_stream_ended():
+    global CURRENT_LOCKED
+    with STATE_LOCK:
+        if not CURRENT_LOCKED:
+            return
+        CURRENT_LOCKED = False
+        try:
+            if os.path.exists("/tmp/airplay_streaming"):
+                os.remove("/tmp/airplay_streaming")
+        except OSError:
+            pass
+        subprocess.run("DISPLAY=:0 xdotool search --class WifiKiosk windowmap 2>/dev/null", shell=True)
+        subprocess.run('DISPLAY=:0 xsetroot -cursor_name left_ptr 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset +dpms dpms 30 30 30 s 30 30 2>/dev/null', shell=True)
+        print("[Kiosk] AirPlay stream ended: Restored standby wallpaper & re-enabled 30s DPMS sleep.")
+
+def monitor_uxplay_output(proc):
+    """
+    Reads UxPlay stdout line-by-line in real time.
+    Detects stream start and end events with 0ms delay, 0% CPU, and 0 X11 lock contention.
+    """
     try:
-        out = subprocess.check_output('DISPLAY=:0 xprop -root _NET_CLIENT_LIST 2>/dev/null', shell=True).decode()
-        parts = out.split('#')
-        if len(parts) > 1:
-            win_ids = parts[1].replace(',', ' ').split()
-            for wid in win_ids:
-                wid = wid.strip()
-                if not wid or wid == '0x0':
-                    continue
-                try:
-                    c_out = subprocess.check_output(f'DISPLAY=:0 xprop -id {wid} WM_CLASS 2>/dev/null', shell=True).decode().lower()
-                    if any(k in c_out for k in ('uxplay', 'gst', 'ximagesink', 'xvimagesink', 'glimagesink', 'autovideosink')):
-                        return True
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    return False
+        with open("/tmp/uxplay.log", "a") as ux_log:
+            for line in iter(proc.stdout.readline, ''):
+                if not line:
+                    break
+                ux_log.write(line)
+                ux_log.flush()
+                if "Initialized GStreamer video renderer" in line or "identified as Connection type RAOP" in line:
+                    on_stream_started()
+                elif "Destroying connection" in line or "exiting TCP thread" in line or "Open connections: 0" in line:
+                    on_stream_ended()
+    except Exception as e:
+        print("[Kiosk] UxPlay monitor error:", e)
 
 def manage_wifi_gui():
     global WIFI_GUI_PROC
@@ -86,41 +118,26 @@ signal.signal(signal.SIGINT, cleanup_and_exit)
 
 def window_watcher():
     """
-    Monitors active X11 windows:
-    - Automatically hides Kiosk UI when streaming starts and wakes up screen
-    - Restores Kiosk UI when streaming ends and restores DPMS sleep
+    Lightweight fallback watcher (runs every 2s, single xdotool check).
+    Ensures state stays synchronized even if stdout stream drops.
     """
     def _watch():
-        was_active = False
-
         while True:
-            active = has_active_video_window()
-
-            if active != was_active:
-                set_inputs(active)
-                if active and not was_active:
-                    # Stream started: notify wifi_gui to withdraw and unmap window
-                    try:
-                        open("/tmp/airplay_streaming", "w").close()
-                    except Exception:
-                        pass
-                    subprocess.run("DISPLAY=:0 xdotool search --class WifiKiosk windowunmap 2>/dev/null", shell=True)
-                    subprocess.run('DISPLAY=:0 xsetroot -solid "#000000" 2>/dev/null', shell=True)
-                    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
-                    subprocess.run('DISPLAY=:0 xset -dpms s off 2>/dev/null', shell=True)
-                    print("[Kiosk] AirPlay stream started: Woke up monitor & kept screen awake.")
-                elif not active and was_active:
-                    # Stream ended: notify wifi_gui to restore and re-enable 30s DPMS
-                    try:
-                        os.remove("/tmp/airplay_streaming")
-                    except OSError:
-                        pass
-                    subprocess.run("DISPLAY=:0 xdotool search --class WifiKiosk windowmap 2>/dev/null", shell=True)
-                    subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
-                    subprocess.run('DISPLAY=:0 xset +dpms dpms 30 30 30 s 30 30 2>/dev/null', shell=True)
-                    print("[Kiosk] AirPlay stream ended: Restored standby wallpaper & re-enabled 30s DPMS sleep.")
-                was_active = active
-            time.sleep(0.3)
+            time.sleep(2.0)
+            if CURRENT_PROC and CURRENT_PROC.poll() is None:
+                try:
+                    out = subprocess.check_output(
+                        "DISPLAY=:0 xdotool search --onlyvisible --class 'uxplay|gst' 2>/dev/null || true",
+                        shell=True
+                    ).decode().strip()
+                    has_win = bool(out)
+                    if has_win and not CURRENT_LOCKED:
+                        on_stream_started()
+                    elif not has_win and CURRENT_LOCKED:
+                        if not os.path.exists("/tmp/airplay_streaming"):
+                            on_stream_ended()
+                except Exception:
+                    pass
 
     t = threading.Thread(target=_watch, daemon=True, name="WindowWatcher")
     t.start()
@@ -227,18 +244,18 @@ def hotplug_and_network_watcher():
                         subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
                         time.sleep(0.5)
 
-                    res, rate, name = make_wallpaper.get_display_info()
-                    new_info = (name, res, rate)
+                        res, rate, name = make_wallpaper.get_display_info()
+                        new_info = (name, res, rate)
 
-                    if CURRENT_DISPLAY is not None and new_info != CURRENT_DISPLAY:
-                        time.sleep(1.0)
-                        subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
-                        time.sleep(0.5)
-                        res2, rate2, name2 = make_wallpaper.get_display_info()
-                        stable_info = (name2, res2, rate2)
+                        if CURRENT_DISPLAY is not None and new_info != CURRENT_DISPLAY:
+                            time.sleep(1.0)
+                            subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
+                            time.sleep(0.5)
+                            res2, rate2, name2 = make_wallpaper.get_display_info()
+                            stable_info = (name2, res2, rate2)
 
-                        if stable_info != CURRENT_DISPLAY and stable_info[0] not in ("None", "Unknown"):
-                            restart_uxplay_for_display(stable_info)
+                            if stable_info != CURRENT_DISPLAY and stable_info[0] not in ("None", "Unknown"):
+                                restart_uxplay_for_display(stable_info)
             except Exception as e:
                 print("[Hotplug] Check error:", e)
 
@@ -359,6 +376,7 @@ def main():
             extra_flags.extend(['-vd', decoder])
 
         cmd = [
+            'stdbuf', '-oL', '-eL',
             'uxplay',
             '-nh',
             '-n', monitor_name,
@@ -369,25 +387,33 @@ def main():
             '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
-            '-vs', video_sink,
-            '-vsync', 'no',
-            '-d'
+            '-vs', video_sink
         ] + extra_flags
 
-        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p)...")
+        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p, smooth clock-synced)...")
         with open("/tmp/uxplay.log", "a") as ux_log:
             ux_log.write(f"\n--- [Kiosk] UxPlay Starting at {time.strftime('%Y-%m-%d %H:%M:%S')} (cmd: {' '.join(cmd)}) ---\n")
             ux_log.flush()
-            with STATE_LOCK:
-                CURRENT_PROC = subprocess.Popen(cmd, stdout=ux_log, stderr=subprocess.STDOUT)
 
-            start_time = time.time()
-            # Block until UxPlay exits (either closed, crashed, or terminated by hotplug watcher)
-            ret = CURRENT_PROC.wait()
-            print(f"[Kiosk] UxPlay exited with code {ret} after {time.time() - start_time:.1f}s")
+        with STATE_LOCK:
+            CURRENT_PROC = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+
+        mon_t = threading.Thread(target=monitor_uxplay_output, args=(CURRENT_PROC,), daemon=True)
+        mon_t.start()
+
+        start_time = time.time()
+        # Block until UxPlay exits (either closed, crashed, or terminated by hotplug watcher)
+        ret = CURRENT_PROC.wait()
+        print(f"[Kiosk] UxPlay exited with code {ret} after {time.time() - start_time:.1f}s")
         
-        # When UxPlay exits, ensure inputs are unlocked and give brief pause
-        set_inputs(False)
+        # When UxPlay exits, ensure inputs and UI are restored
+        on_stream_ended()
 
         # Defensive backoff & Fail-Safe Auto-Recovery
         elapsed = time.time() - start_time

@@ -715,12 +715,13 @@ class WifiKioskApp:
 
     def _network_poll_loop(self):
         """Monitors network connection changes and triggers smooth slide transitions."""
+        # 1. While AirPlay is streaming, suspend all polling to free 100% CPU and X11 bandwidth
+        if getattr(self, "is_withdrawn_for_stream", False) or os.path.exists("/tmp/airplay_streaming"):
+            self.root.after(2000, self._network_poll_loop)
+            return
+
         try:
             net_type, ip, ssid = make_wallpaper.check_network_status(wait_sync=False)
-            _, _, monitor_name = make_wallpaper.get_display_info()
-
-            monitor_changed = (monitor_name != self.monitor_name)
-            self.monitor_name = monitor_name
 
             prev_net_type = self.net_type
             net_changed = (net_type != self.net_type)
@@ -734,7 +735,7 @@ class WifiKioskApp:
                     print("[WifiKiosk] Network connection lost! Sliding to DISCONNECTED state...")
                     self.manual_wifi_open = False
                     self.animate_to_state("DISCONNECTED")
-                elif net_changed or info_changed or monitor_changed:
+                elif net_changed or info_changed:
                     self.update_airplay_panel_image()
             elif net_type == "LAN":
                 # LAN takes absolute priority: ensure Wi-Fi dashboard is closed
@@ -742,7 +743,7 @@ class WifiKioskApp:
                     print("[WifiKiosk] LAN connected; closing Wi-Fi dashboard...")
                     self.manual_wifi_open = False
                     self.animate_to_state("CONNECTED")
-                elif net_changed or info_changed or monitor_changed:
+                elif net_changed or info_changed:
                     self.update_airplay_panel_image()
             else:
                 # Network is active (Wi-Fi)
@@ -754,11 +755,11 @@ class WifiKioskApp:
                         self.animate_to_state("CONNECTED")
                     else:
                         self.update_airplay_panel_image()
-                elif (net_changed or info_changed or monitor_changed) and not self.is_animating:
+                elif (net_changed or info_changed) and not self.is_animating:
                     # Update active connection display (e.g. DHCP IP assigned)
                     self.update_airplay_panel_image()
 
-            if net_changed or info_changed or monitor_changed:
+            if net_changed or info_changed:
                 try:
                     make_wallpaper.generate_wallpaper(
                         wifi_gui_showing=(self.current_state == "DISCONNECTED"),
@@ -769,14 +770,18 @@ class WifiKioskApp:
         except Exception as e:
             print("[WifiKiosk] Poller error:", e)
 
-        self.root.after(1500, self._network_poll_loop)
+        self.root.after(2000, self._network_poll_loop)
 
 
     def _auto_scan_loop(self):
-        """Silently refreshes Wi-Fi scan every 12 seconds when in DISCONNECTED state."""
+        """Silently refreshes Wi-Fi scan every 15 seconds when in DISCONNECTED state and NOT streaming."""
+        if getattr(self, "is_withdrawn_for_stream", False) or os.path.exists("/tmp/airplay_streaming"):
+            self.root.after(15000, self._auto_scan_loop)
+            return
+
         if self.current_state == "DISCONNECTED" and not self.is_connecting and not self.is_scanning:
             self.refresh_networks(force_rescan=True, silent=True)
-        self.root.after(12000, self._auto_scan_loop)
+        self.root.after(15000, self._auto_scan_loop)
 
     def _streaming_check_loop(self):
         """Monitors /tmp/airplay_streaming and withdraws/restores UI during active stream."""
@@ -792,7 +797,7 @@ class WifiKioskApp:
                 self.root.lift()
         except Exception:
             pass
-        self.root.after(200, self._streaming_check_loop)
+        self.root.after(500, self._streaming_check_loop)
 
     def _on_arrow_up(self, event):
         if self.current_state != "DISCONNECTED" or self.password_ssid is not None:

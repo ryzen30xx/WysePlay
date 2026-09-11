@@ -877,33 +877,17 @@ def benchmark_hardware():
         }
         chosen_decoder = p4k["decoder"]
     elif p1080["passed_60"] and not p1080.get("thermal_warning"):
-        mem_mb = get_system_memory_mb()
-        # On Allwinner H313/H616 boards with <= 1.2GB RAM, 1080p@60 exceeds single-channel DDR3 bus for X11 render
-        # and floods cheap SDIO Wi-Fi chips (XR819 missed interrupt). Choose 720p@60 for silky smooth 60fps.
-        if soc_platform == "allwinner" and mem_mb <= 1200 and p720.get("passed_60"):
-            hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p720["is_hw"] else " [CPU]"
-            selected = {
-                "resolution": "1280x720",
-                "width": 1280,
-                "height": 720,
-                "max_fps": 60,
-                "h265": False,
-                "tier": f"HD Ready @ 60 FPS{hw_tag} [Tối ưu Low-Latency Allwinner]",
-                "reason": f"Hệ thống RAM {mem_mb}MB (DDR3). Ưu tiên 720p @ 60 FPS ({p720['fps']} FPS) qua {p720['decoder']} để chống nghẽn bus bộ nhớ X11 và giảm tải Wi-Fi SDIO, duy trì 60 FPS mượt mà."
-            }
-            chosen_decoder = p720["decoder"]
-        else:
-            hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p1080["is_hw"] else " [CPU]"
-            selected = {
-                "resolution": "1920x1080",
-                "width": 1920,
-                "height": 1080,
-                "max_fps": 60,
-                "h265": False,
-                "tier": f"Full HD @ 60 FPS{hw_tag}",
-                "reason": f"1080p đạt {p1080['fps']} FPS chuẩn 60 FPS qua {p1080['decoder']} (CPU: {p1080['telemetry'].get('cpu_avg', 0)}%). Đạt độ nét và độ mượt tối đa."
-            }
-            chosen_decoder = p1080["decoder"]
+        hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p1080["is_hw"] else " [CPU]"
+        selected = {
+            "resolution": "1920x1080",
+            "width": 1920,
+            "height": 1080,
+            "max_fps": 60,
+            "h265": False,
+            "tier": f"Full HD @ 60 FPS{hw_tag}",
+            "reason": f"1080p đạt {p1080['fps']} FPS chuẩn 60 FPS qua {p1080['decoder']} (CPU: {p1080['telemetry'].get('cpu_avg', 0)}%). Đạt độ nét và độ mượt tối đa."
+        }
+        chosen_decoder = p1080["decoder"]
     elif p720["passed_60"]:
         hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p720["is_hw"] else " [CPU]"
         thermal_note = " (1080p bị cảnh báo quá tải/quá nhiệt)" if p1080.get("thermal_warning") else ""
