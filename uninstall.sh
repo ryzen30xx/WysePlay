@@ -91,7 +91,15 @@ if [[ "$ASSUME_YES" != true ]]; then
     if [[ "$PURGE_PACKAGES" == true ]]; then
         echo -e "${C_RED}Lựa chọn --purge-packages sẽ gỡ bỏ cả các gói apt (uxplay, openbox, gstreamer...).${C_RESET}"
     fi
-    read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? (y/N): " confirm
+    confirm=""
+    if [[ -t 0 ]]; then
+        read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? (y/N): " confirm
+    elif [[ -e /dev/tty ]]; then
+        read -rp "Bạn có chắc chắn muốn gỡ cài đặt WysePlay? (y/N): " confirm < /dev/tty
+    else
+        log_warn "Không phát hiện terminal tương tác (non-interactive). Đang tiếp tục gỡ cài đặt..."
+        confirm="y"
+    fi
     if [[ ! "$confirm" =~ ^[yY]([eE][sS])?$ ]]; then
         log_info "Đã hủy thao tác gỡ cài đặt."
         exit 0
