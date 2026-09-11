@@ -1,4 +1,4 @@
-import os, sys, time, subprocess, re, signal, threading, glob
+import os, sys, time, subprocess, re, signal, threading, glob, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -271,6 +271,22 @@ def hotplug_and_network_watcher():
     t = threading.Thread(target=_watch, daemon=True, name="HotplugWatcher")
     t.start()
 
+def load_hardware_profile():
+    """Loads benchmarked hardware profile to limit resolution & FPS for smooth decoding."""
+    config_path = "/opt/airplay/hw_profile.json"
+    if not os.path.isfile(config_path):
+        alt_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hw_profile.json")
+        if os.path.isfile(alt_path):
+            config_path = alt_path
+        else:
+            return None
+    try:
+        with open(config_path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[Kiosk] Error reading {config_path}: {e}")
+        return None
+
 def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
     os.environ['DISPLAY'] = ':0'
@@ -316,14 +332,43 @@ def main():
         # Apply wallpaper
         subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
 
+        # 2. Apply hardware profile constraints (resolution & FPS clamped by decoder benchmark)
+        profile = load_hardware_profile()
+        target_res = res
+        target_fps = rate
+        decoder = "avdec_h264"
+        video_sink = "ximagesink"
+
+        if profile and "selected_profile" in profile:
+            sp = profile["selected_profile"]
+            prof_w = sp.get("width", 1920)
+            prof_h = sp.get("height", 1080)
+            prof_fps = sp.get("max_fps", 60)
+            decoder = profile.get("decoder", "avdec_h264")
+            video_sink = profile.get("video_sink", "ximagesink")
+
+            try:
+                disp_w, disp_h = [int(x) for x in res.split('x')]
+                stream_w = min(disp_w, prof_w)
+                stream_h = min(disp_h, prof_h)
+                target_res = f"{stream_w}x{stream_h}"
+            except Exception:
+                target_res = sp.get("resolution", "1920x1080")
+
+            target_fps = min(int(rate), int(prof_fps))
+            print(f"[Kiosk] Hardware Profile active: {sp.get('tier', 'Custom')} (Decoder: {decoder}, Sink: {video_sink})")
+
         # Check for 4K
         extra_flags = []
         try:
-            w = int(res.split('x')[0])
+            w = int(target_res.split('x')[0])
             if w >= 3840:
                 extra_flags.append('-h265')
         except Exception:
             pass
+
+        if decoder and decoder != 'avdec_h264':
+            extra_flags.extend(['-vd', decoder])
 
         cmd = [
             'uxplay',
@@ -331,14 +376,14 @@ def main():
             '-n', monitor_name,
             '-nohold',
             '-fs',
-            '-s', f'{res}@{rate}',
-            '-fps', str(rate),
+            '-s', f'{target_res}@{target_fps}',
+            '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
-            '-vs', 'ximagesink'
+            '-vs', video_sink
         ] + extra_flags
 
-        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {res}@{rate}Hz...")
+        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz)...")
         with STATE_LOCK:
             CURRENT_PROC = subprocess.Popen(cmd)
 

@@ -258,6 +258,7 @@ install_dependencies() {
         gstreamer1.0-gl
         gstreamer1.0-x
         gstreamer1.0-alsa
+        gstreamer1.0-tools
         fontconfig
         pulseaudio
     )
@@ -312,13 +313,34 @@ deploy_application() {
 
     # Copy SF Symbol PNG Assets
     if [[ -d "${SOURCE_DIR}/assets" ]]; then
-        cp -f "${SOURCE_DIR}/assets"/*.png "${APP_DIR}/assets/"
-        chmod 644 "${APP_DIR}/assets"/*.png
+        cp -f "${SOURCE_DIR}/assets"/*.png "${APP_DIR}/assets/" 2>/dev/null || true
+        chmod 644 "${APP_DIR}/assets"/*.png 2>/dev/null || true
+    fi
+
+    # Copy Benchmark Video Assets
+    if [[ -d "${SOURCE_DIR}/assets/benchmark" ]]; then
+        mkdir -p "${APP_DIR}/assets/benchmark"
+        cp -f "${SOURCE_DIR}/assets/benchmark"/* "${APP_DIR}/assets/benchmark/" 2>/dev/null || true
+        chmod 644 "${APP_DIR}/assets/benchmark"/* 2>/dev/null || true
     fi
 
     # Set ownership
     chown -R "${TARGET_USER}:${TARGET_GROUP}" "${APP_DIR}"
     log_success "Đã triển khai toàn bộ scripts và assets vào: ${APP_DIR}"
+}
+
+# ==============================================================================
+# BENCHMARK HARDWARE DECODING (CPU/GPU)
+# ==============================================================================
+
+benchmark_hardware_decoding() {
+    log_step "Đo kiểm hiệu năng giải mã phần cứng CPU/GPU (Mục tiêu 60 FPS)..."
+
+    if [[ -f "${APP_DIR}/benchmark_decoder.py" ]]; then
+        python3 "${APP_DIR}/benchmark_decoder.py" --force
+    else
+        log_warn "Không tìm thấy benchmark_decoder.py. Bỏ qua bước đo kiểm."
+    fi
 }
 
 # ==============================================================================
@@ -403,6 +425,7 @@ main() {
     install_dependencies
     install_apple_fonts
     deploy_application
+    benchmark_hardware_decoding
     configure_user_environment
     configure_systemd_service
 
@@ -415,6 +438,21 @@ main() {
     echo -e "  • Thư mục cài đặt:   ${C_CYAN}/opt/airplay${C_RESET}"
     echo -e "  • Người dùng Kiosk:   ${C_CYAN}${TARGET_USER}${C_RESET}"
     echo -e "  • Tên dịch vụ:        ${C_CYAN}airplay-kiosk.service${C_RESET}"
+    if [[ -f /opt/airplay/hw_profile.json ]]; then
+        PROFILE_INFO=$(python3 -c "
+import json
+try:
+    with open('/opt/airplay/hw_profile.json') as f:
+        d = json.load(f)
+        sp = d.get('selected_profile', {})
+        print(f\"{sp.get('tier', 'Custom')} ({sp.get('resolution', '')} @ {sp.get('max_fps', 60)}fps, {d.get('decoder', 'avdec_h264')})\")
+except Exception:
+    pass
+" 2>/dev/null || true)
+        if [[ -n "$PROFILE_INFO" ]]; then
+            echo -e "  • Cấu hình AirPlay:   ${C_GREEN}${PROFILE_INFO}${C_RESET}"
+        fi
+    fi
     echo ""
     echo -e "${C_BOLD}Các lệnh điều khiển hữu ích:${C_RESET}"
     echo -e "  • Kiểm tra trạng thái: ${C_YELLOW}sudo systemctl status airplay-kiosk${C_RESET}"
