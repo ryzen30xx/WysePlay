@@ -960,6 +960,7 @@ class WifiKioskApp:
         )
         self.canvas_root.tag_raise(self.pin_modal_item)
         try:
+            subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null; DISPLAY=:0 xset dpms 0 0 0 -dpms s off s 0 0 2>/dev/null', shell=True)
             self.root.deiconify()
             self.root.attributes("-fullscreen", True)
             self.root.lift()

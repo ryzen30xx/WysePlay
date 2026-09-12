@@ -82,9 +82,13 @@ def monitor_uxplay_output(proc):
                 ux_log.write(line)
                 ux_log.flush()
                 # Track AirPlay PIN authentication requests and display on screen
+                if "PAIR-PIN-START" in line or "connection request from" in line:
+                    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null; DISPLAY=:0 xset dpms 0 0 0 -dpms s off s 0 0 2>/dev/null', shell=True)
+
                 m = re.search(r'CLIENT MUST NOW ENTER PIN = "(\d{4})"', line)
                 if m:
                     pin_code = m.group(1)
+                    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null; DISPLAY=:0 xset dpms 0 0 0 -dpms s off s 0 0 2>/dev/null', shell=True)
                     try:
                         with open("/tmp/airplay_pin.txt", "w") as pf:
                             pf.write(pin_code + "\n")
