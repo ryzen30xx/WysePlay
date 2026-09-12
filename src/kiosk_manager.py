@@ -584,10 +584,8 @@ def main():
             # Match native physical monitor resolution (e.g. 1920x1080 Full HD) for sharp 1:1 display
             target_res = res if (res and res not in ("None", "Unknown")) else sp.get("resolution", "1920x1080")
             stream_fps = int(target_fps) if target_fps else 60
-            # Note: v4l2slh264dec at 1080p causes kernel CMA memory pool exhaustion and drops 60% frames.
-            # avdec_h264 (ARM NEON multi-threaded assembly) achieves 203.9 FPS with zero drops in native I420.
-            decoder = "avdec_h264"
-            print(f"[Kiosk] Profile Allwinner H313/H616: Native {target_res}@{stream_fps}fps với bộ giải mã tối ưu NEON {decoder} (Direct I420 xvimagesink, zero-copy, vsync no)")
+            decoder = "v4l2slh264dec"
+            print(f"[Kiosk] Profile Allwinner H313/H616: Native {target_res}@{stream_fps}fps (HW VPU {decoder}, zero-copy DMABUF, vsync no, zero-delay leaky queue)")
         else:
             # Generic / higher-end hardware: keep benchmarked framerate and configurations
             target_res = res if (res and res not in ("None", "Unknown")) else sp.get("resolution", "1920x1080")
