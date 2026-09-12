@@ -581,15 +581,15 @@ def main():
         # Determine if running specifically on Allwinner H313/H616 platform
         is_h313_h616 = is_allwinner_h313_h616(profile)
         if is_h313_h616:
-            # Tailored strictly for Allwinner H313/H616 (Quad Cortex-A53 + XR819 2.4GHz Wi-Fi):
-            # 1280x720@30 achieves solid 30 FPS hardware VPU decoding without frame drops or macroblock corruption
-            target_res = "1280x720"
-            stream_fps = 30
+            # Match native physical monitor resolution (e.g. 1920x1080 Full HD) for sharp 1:1 display
+            target_res = res if (res and res not in ("None", "Unknown")) else sp.get("resolution", "1920x1080")
+            stream_fps = int(target_fps) if target_fps else 60
             decoder = "v4l2slh264dec"
-            print(f"[Kiosk] Profile Allwinner H313/H616 phát hiện: Áp dụng cấu hình 720p (1280x720@30fps HW VPU v4l2slh264dec, zero-copy DMABUF, vsync no)")
+            print(f"[Kiosk] Profile Allwinner H313/H616 phát hiện: Áp dụng độ phân giải native {target_res}@{stream_fps}fps (HW VPU {decoder}, zero-copy DMABUF, vsync no)")
         else:
             # Generic / higher-end hardware: keep benchmarked framerate and configurations
-            stream_fps = int(target_fps)
+            target_res = res if (res and res not in ("None", "Unknown")) else sp.get("resolution", "1920x1080")
+            stream_fps = int(target_fps) if target_fps else 60
 
         # Automatic Fail-Safe: If hardware decoder previously crashed, force CPU decoder
         if hw_fallback_active:
