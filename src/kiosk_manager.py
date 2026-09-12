@@ -430,18 +430,14 @@ def main():
         is_h313_h616 = is_allwinner_h313_h616(profile)
         if is_h313_h616:
             # Tailored strictly for Allwinner H313/H616 (Quad Cortex-A53 + XR819 2.4GHz Wi-Fi):
-            # 1. Screen resolution advertised to AirPlay: 1280x720 (HD 16:9).
-            #    - Cuts Wi-Fi payload down to ~1.8 Mbps (XR819 runs smoothly with 0% drop).
-            #    - High sharpness and clarity for text, cursor, and graphics.
-            # 2. Hardware VPU decoder (v4l2slh264dec) with direct DMABUF zero-copy rendering:
-            #    - v4l2slh264dec + xvimagesink achieves 47 FPS @ 720p with ZERO CPU decoding overhead!
-            #    - Bypasses software videoconvert (-vc none) so CPU cores are free for network SDIO interrupts.
-            # 3. Clamped TCP buffer (64KB) + 1-buffer leaky queues prevent all multi-second lag accumulation.
-            # 4. Use -vsync no for zero-latency interactive mirroring.
-            target_res = "1280x720"
+            # Testing 1080p (1920x1080@30) per user request:
+            # - Hardware VPU decoder (v4l2slh264dec) with direct DMABUF zero-copy rendering
+            # - Clamped TCP buffer (64KB) + 1-buffer leaky queues prevent all multi-second lag accumulation
+            # - Use -vsync no for zero-latency interactive mirroring
+            target_res = "1920x1080"
             stream_fps = 30
             decoder = "v4l2slh264dec"
-            print(f"[Kiosk] Profile Allwinner H313/H616 phát hiện: Áp dụng cấu hình phần cứng tối ưu (1280x720@30fps HW VPU v4l2slh264dec, zero-copy DMABUF, vsync no)")
+            print(f"[Kiosk] Profile Allwinner H313/H616 phát hiện: Áp dụng cấu hình 1080p (1920x1080@30fps HW VPU v4l2slh264dec, zero-copy DMABUF, vsync no)")
         else:
             # Generic / higher-end hardware: keep benchmarked framerate and configurations
             stream_fps = int(target_fps)
