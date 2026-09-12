@@ -922,6 +922,11 @@ class WifiKioskApp:
 
     def _show_pin_modal(self, pin_str):
         print(f"[WifiKiosk] >>> DISPLAYING PIN MODAL: {pin_str} <<<", flush=True)
+        try:
+            subprocess.run("DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null", shell=True)
+            subprocess.run("DISPLAY=:0 xset dpms force on 2>/dev/null", shell=True)
+        except Exception:
+            pass
         self._current_displayed_pin = pin_str
         self.pin_modal_photo = self._render_pin_modal_image(pin_str)
         if self.pin_modal_item is not None:
@@ -930,6 +935,12 @@ class WifiKioskApp:
             self.sw // 2, self.sh // 2, image=self.pin_modal_photo, anchor="center"
         )
         self.canvas_root.tag_raise(self.pin_modal_item)
+        try:
+            self.root.deiconify()
+            self.root.attributes("-fullscreen", True)
+            self.root.lift()
+        except Exception:
+            pass
 
     def _hide_pin_modal(self):
         if self.pin_modal_item is not None:

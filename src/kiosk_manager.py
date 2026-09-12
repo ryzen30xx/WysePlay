@@ -65,9 +65,9 @@ def on_stream_ended():
             pass
         subprocess.run("DISPLAY=:0 xdotool search --class WifiKiosk windowmap 2>/dev/null", shell=True)
         subprocess.run('DISPLAY=:0 xsetroot -cursor_name left_ptr 2>/dev/null', shell=True)
-        subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
-        subprocess.run('DISPLAY=:0 xset +dpms dpms 30 30 30 s 30 30 2>/dev/null', shell=True)
-        print("[Kiosk] AirPlay stream ended: Restored standby wallpaper & re-enabled 30s DPMS sleep.")
+        subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
+        print("[Kiosk] AirPlay stream ended: Restored standby wallpaper (screen active).")
 
 def monitor_uxplay_output(proc):
     """
@@ -320,9 +320,10 @@ def main():
     except OSError:
         pass
 
-    # Clear root screen and configure DPMS monitor sleep (30s idle, wakes on stream)
+    # Clear root screen and disable DPMS monitor sleep (screen stays on 24/7)
     subprocess.run('DISPLAY=:0 xsetroot -solid "#000000"', shell=True)
-    subprocess.run('DISPLAY=:0 xset +dpms dpms 30 30 30 s 30 30 2>/dev/null', shell=True)
+    subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
+    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
     
     # Ensure inputs are unlocked in standby
     set_inputs(False)
