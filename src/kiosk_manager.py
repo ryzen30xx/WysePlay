@@ -630,12 +630,14 @@ def main():
         elif decoder and decoder not in ('avdec_h264', 'avdec_h265'):
             extra_flags.extend(['-vd', decoder])
 
-        # Ensure xvimagesink has qos=false and max-lateness=-1 to eliminate latency drops
+        # Ensure xvimagesink has qos=false, max-lateness=-1, and disables borders for maximum performance
         if "xvimagesink" in video_sink:
             if "qos=false" not in video_sink:
                 video_sink = video_sink.replace("xvimagesink", "xvimagesink qos=false")
             if "max-lateness" not in video_sink:
                 video_sink = video_sink.replace("xvimagesink", "xvimagesink max-lateness=-1")
+            if "force-aspect-ratio" not in video_sink:
+                video_sink += " force-aspect-ratio=false draw-borders=false"
 
         # Zero-latency live mirroring mode, persistent client whitelist & PIN prompt
         extra_flags.extend([
