@@ -268,7 +268,7 @@ index 4473901..98973d3 100644
      GstClockTime pts = (GstClockTime) *ntp_time; /*now in nsecs */
      //GstClockTimeDiff latency = GST_CLOCK_DIFF(gst_element_get_current_clock_time (renderer->appsrc), pts);
 diff --git a/uxplay.cpp b/uxplay.cpp
-index 3246ffd..d050046 100644
+index 3246ffd..e162bc1 100644
 --- a/uxplay.cpp
 +++ b/uxplay.cpp
 @@ -171,6 +171,7 @@ static void log(int level, const char* format, ...) {
@@ -366,15 +366,6 @@ index 3246ffd..d050046 100644
 +    dnssd_set_airplay_features(dnssd, 21, use_audio ? 1 : 0); // Audio format 4 support:
      dnssd_set_airplay_features(dnssd, 22, 1); // Authentication type 4: FairPlay authentication
      dnssd_set_airplay_features(dnssd, 23, 0); // Authentication type 1: RSA Authentication
- 
-@@ -1424,7 +1429,7 @@ static int start_dnssd(std::vector<char> hw_addr, std::string name) {
- 
-     dnssd_set_airplay_features(dnssd, 28, 1); //  
-     dnssd_set_airplay_features(dnssd, 29, 0); // 
--    dnssd_set_airplay_features(dnssd, 30, 1); // RAOP support: with this bit set, the AirTunes service is not required. 
-+    dnssd_set_airplay_features(dnssd, 30, use_audio ? 1 : 0); // RAOP support: with this bit set, the AirTunes service is not required. 
-     dnssd_set_airplay_features(dnssd, 31, 0); // 
- 
  
 @@ -1524,6 +1529,14 @@ extern "C" void video_set_codec(void *cls, video_codec_t codec) {
  }
