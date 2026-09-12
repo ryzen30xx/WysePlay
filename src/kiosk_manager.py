@@ -412,13 +412,13 @@ def main():
         if decoder and decoder not in ('avdec_h264', 'avdec_h265'):
             extra_flags.extend(['-vd', decoder])
         elif decoder == 'avdec_h264':
-            extra_flags.append('-avdec')
+            extra_flags.extend(['-vd', 'avdec_h264', '-vc', 'videoconvert n-threads=4'])
 
         # Ensure xvimagesink has qos=false to prevent decoder frame drops
         if "xvimagesink" in video_sink and "qos=false" not in video_sink:
             video_sink = video_sink.replace("xvimagesink", "xvimagesink qos=false")
 
-        # Clock-synced 60 FPS presentation, low audio buffer, persistent client whitelist & PIN prompt
+        # Zero-latency live mirroring mode, low audio buffer, persistent client whitelist & PIN prompt
         extra_flags.extend([
             '-al', '0.05',
             '-pin',
@@ -437,7 +437,7 @@ def main():
             '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
-            '-vsync', '0',
+            '-vsync', 'no',
             '-FPSdata',
             '-vs', video_sink
         ] + extra_flags
