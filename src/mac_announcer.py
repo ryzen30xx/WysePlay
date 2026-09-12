@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 WysePlay - macOS Bonjour / AirPlay Proxy Announcer
-Bridges TV Box AirPlay announcement into macOS mDNSResponder when Wi-Fi routers
-(such as Huawei / GPON routers) drop multicast packets between wireless clients.
+Bridges TV Box AirPlay announcement into macOS mDNSResponder with proper Apple TV Screen Mirroring flags (0x204).
 """
 
 import sys, os, time, subprocess, signal
@@ -15,21 +14,22 @@ RAOP_NAME = f"1200D5218EC0@{AIRPLAY_NAME}"
 AIRPLAY_TXT = [
     "deviceid=12:00:d5:21:8e:c0",
     "features=0x527FFEE6,0x0",
-    "flags=0x4",
+    "flags=0x20C",
     "model=AppleTV3,2",
     "pk=f31f2ddf6bf1b7ec65beb1c18b0ea76acf34f6ebdb0386b4000e28b77ebfb0e4",
     "pw=false",
-    "pi=2e388006-13ba-4041-9a67-25dd4a43d536",
     "srcvers=220.68",
-    "vv=2"
+    "vv=2",
+    "pi=2e388006-13ba-4041-9a67-25dd4a43d536"
 ]
 
 RAOP_TXT = [
     "ch=2", "cn=0,1,2,3", "da=true", "et=0,3,5", "vv=2",
     "ft=0x527FFEE6,0x0", "am=AppleTV3,2", "md=0,1,2", "rhd=5.6.0.0",
     "pw=false", "sr=44100", "ss=16", "sv=false", "tp=UDP", "txtvers=1",
-    "sf=0x4", "vs=220.68", "vn=65537",
-    "pk=f31f2ddf6bf1b7ec65beb1c18b0ea76acf34f6ebdb0386b4000e28b77ebfb0e4"
+    "sf=0x20C", "vs=220.68", "vn=65537",
+    "pk=f31f2ddf6bf1b7ec65beb1c18b0ea76acf34f6ebdb0386b4000e28b77ebfb0e4",
+    "pi=2e388006-13ba-4041-9a67-25dd4a43d536"
 ]
 
 def find_active_tvbox_ip():
@@ -42,7 +42,7 @@ def find_active_tvbox_ip():
 def main():
     target_ip = sys.argv[1] if len(sys.argv) > 1 else find_active_tvbox_ip()
     print(f"[Mac Announcer] Target TV Box IP: {target_ip}")
-    print(f"[Mac Announcer] Registering proxy for '{AIRPLAY_NAME}' in macOS mDNSResponder...")
+    print(f"[Mac Announcer] Registering proxy for '{AIRPLAY_NAME}' (flags=0x204, sf=0x204) in macOS mDNSResponder...")
 
     cmd_airplay = [
         "dns-sd", "-P", AIRPLAY_NAME, "_airplay._tcp", "local.", "7000",
@@ -54,8 +54,8 @@ def main():
         TVBOX_HOSTNAME, target_ip
     ] + RAOP_TXT
 
-    p_airplay = subprocess.Popen(cmd_airplay, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    p_raop = subprocess.Popen(cmd_raop, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    p_airplay = subprocess.Popen(cmd_airplay)
+    p_raop = subprocess.Popen(cmd_raop)
 
     def cleanup(sig, frame):
         print("\n[Mac Announcer] Stopping proxy registrations...")
@@ -66,7 +66,7 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    print(f"[Mac Announcer] Active! '{AIRPLAY_NAME}' is now visible in macOS Control Center / Screen Mirroring.")
+    print(f"[Mac Announcer] Active! '{AIRPLAY_NAME}' is now registered with Screen Mirroring capabilities.")
     sys.stdout.flush()
 
     try:

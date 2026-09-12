@@ -81,18 +81,44 @@ def monitor_uxplay_output(proc):
                     break
                 ux_log.write(line)
                 ux_log.flush()
+                # Track AirPlay PIN authentication requests and display on screen
+                m = re.search(r'CLIENT MUST NOW ENTER PIN = "(\d{4})"', line)
+                if m:
+                    pin_code = m.group(1)
+                    try:
+                        with open("/tmp/airplay_pin.txt", "w") as pf:
+                            pf.write(pin_code + "\n")
+                        print(f"[Kiosk] PIN Passcode generated: {pin_code}. Displaying on screen.")
+                    except Exception:
+                        pass
+                elif "registered new client" in line:
+                    try:
+                        if os.path.exists("/tmp/airplay_pin.txt"):
+                            os.remove("/tmp/airplay_pin.txt")
+                    except Exception:
+                        pass
+
                 if "Initialized GStreamer video renderer" in line or "identified as Connection type RAOP" in line:
+                    try:
+                        if os.path.exists("/tmp/airplay_pin.txt"):
+                            os.remove("/tmp/airplay_pin.txt")
+                    except Exception:
+                        pass
                     on_stream_started()
                 elif (
                     "Destroying connection" in line
                     or "exiting TCP thread" in line
-                    or "Open connections: 0" in line
-                    or "Connection closed for socket" in line
                     or "running is no longer true" in line
                     or "video has finished" in line
                     or "video_reset" in line
                 ):
-                    on_stream_ended()
+                    if CURRENT_LOCKED:
+                        try:
+                            if os.path.exists("/tmp/airplay_pin.txt"):
+                                os.remove("/tmp/airplay_pin.txt")
+                        except Exception:
+                            pass
+                        on_stream_ended()
     except Exception as e:
         print("[Kiosk] UxPlay monitor error:", e)
 
@@ -102,7 +128,7 @@ def manage_wifi_gui():
         if WIFI_GUI_PROC is None or WIFI_GUI_PROC.poll() is not None:
             print("[Kiosk] Launching/ensuring unified Standby & Wi-Fi Kiosk UI...")
             env = dict(os.environ, DISPLAY=":0")
-            WIFI_GUI_PROC = subprocess.Popen(["python3", "/opt/airplay/wifi_gui.py"], env=env)
+            WIFI_GUI_PROC = subprocess.Popen(["python3", "-u", "/opt/airplay/wifi_gui.py"], env=env)
 
 def cleanup_and_exit(signum, frame):
     global CURRENT_PROC, WIFI_GUI_PROC
@@ -389,7 +415,13 @@ def main():
             video_sink = video_sink.replace("xvimagesink", "xvimagesink qos=false")
 
         # Low latency: -vsync no uncouples video from audio timestamps (zero presentation delay), multi-core color conversion
-        extra_flags.extend(['-al', '0.1', '-vc', 'videoconvert n-threads=4'])
+        # Pin security & persistent registered whitelist for paired clients
+        extra_flags.extend([
+            '-al', '0.1',
+            '-vc', 'videoconvert n-threads=4',
+            '-pin',
+            '-reg', '/opt/airplay/registered_clients.txt'
+        ])
 
         cmd = [
             'stdbuf', '-oL', '-eL',

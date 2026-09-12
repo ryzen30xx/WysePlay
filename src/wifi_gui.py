@@ -293,6 +293,11 @@ class WifiKioskApp:
         self.wifi_window = self.canvas_root.create_window(self.cur_wx, self.wifi_y, window=self.wifi_frame, anchor="nw")
         self._build_wifi_ui()
 
+        # 3. PIN Code Modal Overlay on root canvas (initially hidden)
+        self.pin_modal_photo = None
+        self._current_displayed_pin = None
+        self.pin_modal_item = None
+
         # Key bindings
         self._bind_keys()
 
@@ -309,6 +314,9 @@ class WifiKioskApp:
         # Monitor active streaming state to withdraw/restore window instantly
         self.is_withdrawn_for_stream = False
         self.root.after(200, self._streaming_check_loop)
+
+        # Check for AirPlay Passcode PIN display request (every 150ms)
+        self.root.after(150, self._pin_check_loop)
 
     def _render_panel_image(self, has_network):
         """Renders raw PIL Image for AirPlay Standby Notification Panel with 2x supersampling."""
@@ -798,6 +806,163 @@ class WifiKioskApp:
         except Exception:
             pass
         self.root.after(500, self._streaming_check_loop)
+
+    def _render_pin_modal_image(self, pin_str):
+        """
+        Renders an authentic Apple TV AirPlay Passcode overlay.
+        Full screen dark scrim backdrop with a centered glassmorphic card
+        and 4 large, crisp digit boxes.
+        """
+        SS = 2
+        W = self.sw * SS
+        H = self.sh * SS
+        scale = min(self.sw / 1920, self.sh / 1080) * SS
+        if scale < 1.2:
+            scale = 1.2
+
+        # 82% dark translucent backdrop
+        img = Image.new("RGBA", (W, H), (7, 7, 9, int(255 * 0.82)))
+        draw = ImageDraw.Draw(img)
+
+        # Card dimensions
+        cw = int(620 * scale)
+        ch = int(410 * scale)
+        cx = (W - cw) // 2
+        cy = (H - ch) // 2
+        radius = int(28 * scale)
+
+        # Ambient blue glow behind the card (authentic Apple TV lighting)
+        max_glow = int(360 * scale)
+        glow_img = Image.new("RGBA", (max_glow * 2, max_glow * 2), (0, 0, 0, 0))
+        glow_draw = ImageDraw.Draw(glow_img)
+        for r in range(max_glow, 0, -3):
+            alpha = int(26 * (1.0 - r / float(max_glow)))
+            glow_draw.ellipse([max_glow - r, max_glow - r, max_glow + r, max_glow + r], fill=(0, 113, 227, alpha))
+        img.paste(glow_img, (W // 2 - max_glow, H // 2 - max_glow), glow_img)
+
+        # Main Card background with border
+        draw.rounded_rectangle(
+            [cx, cy, cx + cw, cy + ch],
+            radius=radius,
+            fill="#161618",
+            outline="#3a3a3c",
+            width=int(2 * scale)
+        )
+
+        # AirPlay Symbol Icon
+        target_icon_h = int(42 * scale)
+        curr_y = cy + int(34 * scale)
+        try:
+            sym = Image.open(get_asset_file("airplay_med.png")).convert("RGBA")
+            ratio = target_icon_h / sym.height
+            target_icon_w = int(sym.width * ratio)
+            sym = sym.resize((target_icon_w, target_icon_h), Image.Resampling.LANCZOS)
+            icon_x = (W - target_icon_w) // 2
+            img.paste(sym, (icon_x, curr_y), sym)
+        except Exception:
+            target_icon_h = int(32 * scale)
+
+        curr_y += target_icon_h + int(14 * scale)
+
+        # Typography
+        try:
+            font_title = ImageFont.truetype(FONT_DISPLAY_BOLD, int(22 * scale))
+            font_sub = ImageFont.truetype(FONT_TEXT_REG, int(12 * scale))
+            font_digit = ImageFont.truetype(FONT_DISPLAY_HEAVY, int(46 * scale))
+            font_foot = ImageFont.truetype(FONT_TEXT_SEMI, int(11 * scale))
+        except Exception:
+            font_title = font_sub = font_digit = font_foot = ImageFont.load_default()
+
+        # Title: "Mật mã AirPlay"
+        t_title = "Mật mã AirPlay"
+        b_title = draw.textbbox((0, 0), t_title, font=font_title)
+        draw.text(((W - (b_title[2] - b_title[0])) // 2, curr_y), t_title, fill="#ffffff", font=font_title)
+        curr_y += (b_title[3] - b_title[1]) + int(8 * scale)
+
+        # Subtitle: "Nhập mã này trên thiết bị của bạn để kết nối với <monitor_name>"
+        dev_name = self.monitor_name if self.monitor_name else "AirPlay Display"
+        t_sub = f"Nhập mật mã này trên thiết bị của bạn để kết nối với \"{dev_name}\""
+        b_sub = draw.textbbox((0, 0), t_sub, font=font_sub)
+        draw.text(((W - (b_sub[2] - b_sub[0])) // 2, curr_y), t_sub, fill="#86868b", font=font_sub)
+        curr_y += (b_sub[3] - b_sub[1]) + int(26 * scale)
+
+        # 4 Large PIN Digit Boxes
+        box_w = int(88 * scale)
+        box_h = int(108 * scale)
+        box_gap = int(20 * scale)
+        box_r = int(18 * scale)
+        total_boxes_w = 4 * box_w + 3 * box_gap
+        start_bx = (W - total_boxes_w) // 2
+
+        digits = list(str(pin_str).strip()[:4].ljust(4, "•"))
+        for idx, d in enumerate(digits):
+            bx = start_bx + idx * (box_w + box_gap)
+            draw.rounded_rectangle(
+                [bx, curr_y, bx + box_w, curr_y + box_h],
+                radius=box_r,
+                fill="#222225",
+                outline="#48484a",
+                width=int(2 * scale)
+            )
+            b_d = draw.textbbox((0, 0), d, font=font_digit)
+            dw = b_d[2] - b_d[0]
+            dh = b_d[3] - b_d[1]
+            dx = bx + (box_w - dw) // 2 - b_d[0]
+            dy = curr_y + (box_h - dh) // 2 - b_d[1] - int(2 * scale)
+            draw.text((dx, dy), d, fill="#ffffff", font=font_digit)
+
+        curr_y += box_h + int(24 * scale)
+
+        # Footer Badge: "✓ Thiết bị sẽ tự động được lưu vào danh sách tin cậy sau khi kết nối"
+        t_foot = "✓ Thiết bị sẽ tự động được lưu vào danh sách tin cậy sau khi kết nối"
+        b_foot = draw.textbbox((0, 0), t_foot, font=font_foot)
+        draw.text(((W - (b_foot[2] - b_foot[0])) // 2, curr_y), t_foot, fill="#30d158", font=font_foot)
+
+        return ImageTk.PhotoImage(img.resize((self.sw, self.sh), Image.Resampling.LANCZOS))
+
+    def _show_pin_modal(self, pin_str):
+        print(f"[WifiKiosk] >>> DISPLAYING PIN MODAL: {pin_str} <<<", flush=True)
+        self._current_displayed_pin = pin_str
+        self.pin_modal_photo = self._render_pin_modal_image(pin_str)
+        if self.pin_modal_item is not None:
+            self.canvas_root.delete(self.pin_modal_item)
+        self.pin_modal_item = self.canvas_root.create_image(
+            self.sw // 2, self.sh // 2, image=self.pin_modal_photo, anchor="center"
+        )
+        self.canvas_root.tag_raise(self.pin_modal_item)
+
+    def _hide_pin_modal(self):
+        if self.pin_modal_item is not None:
+            print("[WifiKiosk] Dismissing PIN modal", flush=True)
+            self.canvas_root.delete(self.pin_modal_item)
+            self.pin_modal_item = None
+            self.pin_modal_photo = None
+            self._current_displayed_pin = None
+
+    def _pin_check_loop(self):
+        try:
+            pin_file = "/tmp/airplay_pin.txt"
+            if os.path.exists(pin_file):
+                mtime = os.path.getmtime(pin_file)
+                if time.time() - mtime > 60:
+                    try:
+                        os.remove(pin_file)
+                    except Exception:
+                        pass
+                    self._hide_pin_modal()
+                else:
+                    with open(pin_file, "r") as f:
+                        pin = f.read().strip()
+                    if len(pin) == 4 and pin.isdigit():
+                        if getattr(self, "_current_displayed_pin", None) != pin:
+                            self._show_pin_modal(pin)
+                    else:
+                        self._hide_pin_modal()
+            else:
+                self._hide_pin_modal()
+        except Exception as e:
+            print(f"[WifiKiosk] Error in pin check loop: {e}", flush=True)
+        self.root.after(150, self._pin_check_loop)
 
     def _on_arrow_up(self, event):
         if self.current_state != "DISCONNECTED" or self.password_ssid is not None:
