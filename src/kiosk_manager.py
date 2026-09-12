@@ -344,58 +344,78 @@ def is_allwinner_h313_h616(profile=None):
         pass
     return False
 
-def check_hdmi_audio_support() -> tuple[bool, str]:
+def check_display_audio_support() -> tuple[bool, str]:
     """
-    Checks if the connected HDMI display supports audio playback.
-    Inspects ALSA ELD (/proc/asound/card*/eld*) and DRM EDID CEA-861 blocks.
+    Universal audio capability check for any display connected via HDMI, DisplayPort (DP/eDP), or DVI.
+    Compatible across ALL CPU architectures (x86_64, ARM64, ARMv7, MIPS, RISC-V) and GPU drivers
+    (Intel i915, AMDGPU, Nouveau/Nvidia, VC4/RaspberryPi, Allwinner Cedrus/DE, Rockchip, Panfrost).
     Returns (has_audio: bool, reason: str).
     """
-    # 1. Primary check: ALSA ELD (EDID-Like Data created by ALSA SoC HDMI codec)
-    eld_files = glob.glob("/proc/asound/card*/eld*")
-    for eld_path in eld_files:
+    # 1. Primary check: Universal DRM Connector & EDID scan
+    has_connected_display = False
+    for status_file in sorted(glob.glob("/sys/class/drm/card*-*/status")):
+        try:
+            with open(status_file, "r") as f:
+                if f.read().strip() != "connected":
+                    continue
+            conn_dir = os.path.dirname(status_file)
+            conn_name = os.path.basename(conn_dir)
+            if "writeback" in conn_name.lower():
+                continue
+            has_connected_display = True
+
+            edid_file = os.path.join(conn_dir, "edid")
+            if os.path.isfile(edid_file):
+                with open(edid_file, "rb") as f:
+                    edid = f.read()
+                # Check valid EDID header (00 FF FF FF FF FF FF 00)
+                if len(edid) >= 256 and edid[:8] == b"\x00\xff\xff\xff\xff\xff\xff\x00":
+                    ext_blocks = edid[126]
+                    for i in range(1, ext_blocks + 1):
+                        block = edid[i * 128 : (i + 1) * 128]
+                        if len(block) == 128 and block[0] == 0x02:  # CTA/CEA-861 Extension
+                            # Byte 3 Bit 6 = Basic Audio Support flag
+                            basic_audio = bool(block[3] & 0x40)
+                            if basic_audio:
+                                return True, f"DRM {conn_name} CEA-861 Basic Audio bit bật"
+                            dtd_start = block[2]
+                            offset = 4
+                            while offset < dtd_start and offset < 128:
+                                header = block[offset]
+                                tag = (header >> 5) & 0x07
+                                length = header & 0x1F
+                                if tag == 1 and length > 0:  # Audio Data Block with SADs
+                                    return True, f"DRM {conn_name} CEA-861 Audio Data Block ({length // 3} SADs)"
+                                offset += 1 + length
+                    return False, f"DRM {conn_name} có CEA-861 nhưng không có bộ giải mã âm thanh"
+        except Exception:
+            pass
+
+    # 2. Secondary check: Universal ALSA ELD (EDID-Like Data) scan for HDMI / DisplayPort codecs
+    for eld_path in sorted(glob.glob("/proc/asound/**/eld*", recursive=True)):
         try:
             with open(eld_path, "r", errors="ignore") as f:
                 content = f.read()
-            if "connection_type" in content and "HDMI" in content:
+            if any(k in content for k in ("HDMI", "DisplayPort", "DP")):
+                if "eld_valid" in content and re.search(r"eld_valid\s+0", content):
+                    continue
                 m = re.search(r"sad_count\s+(\d+)", content)
                 if m:
-                    sad_count = int(m.group(1))
-                    if sad_count > 0:
-                        return True, f"ALSA ELD sad_count={sad_count}"
+                    sad = int(m.group(1))
+                    if sad > 0:
+                        return True, f"ALSA ELD ({os.path.basename(eld_path)}) sad_count={sad}"
                     else:
-                        return False, f"ALSA ELD sad_count=0 (không có Short Audio Descriptors)"
+                        return False, f"ALSA ELD ({os.path.basename(eld_path)}) sad_count=0 (không có loa)"
         except Exception:
             pass
 
-    # 2. Secondary check: Direct DRM HDMI EDID CEA-861 block
-    drm_edids = glob.glob("/sys/class/drm/card*-HDMI*/edid")
-    for edid_path in drm_edids:
-        try:
-            with open(edid_path, "rb") as f:
-                edid = f.read()
-            if len(edid) >= 256:
-                ext_blocks = edid[126]
-                for i in range(1, ext_blocks + 1):
-                    block = edid[i * 128 : (i + 1) * 128]
-                    if len(block) == 128 and block[0] == 0x02:  # CEA-861
-                        # Bit 6 of byte 3 is Basic Audio Support
-                        basic_audio = bool(block[3] & 0x40)
-                        if basic_audio:
-                            return True, "DRM EDID CEA-861 bit Basic Audio bật"
-                        dtd_start = block[2]
-                        offset = 4
-                        while offset < dtd_start and offset < 128:
-                            header = block[offset]
-                            tag = (header >> 5) & 0x07
-                            length = header & 0x1F
-                            if tag == 1 and length > 0:  # Audio Data Block
-                                return True, "DRM EDID CEA-861 tìm thấy Audio Data Block"
-                            offset += 1 + length
-                return False, "DRM EDID CEA-861 không có khối Audio Data"
-        except Exception:
-            pass
+    if not has_connected_display:
+        return False, "Không phát hiện màn hình kết nối qua cổng đồ họa số (HDMI/DP)"
 
-    return False, "Không phát hiện phần cứng âm thanh HDMI"
+    return False, "Màn hình kết nối không hỗ trợ âm thanh số"
+
+# Backward compatibility alias
+check_hdmi_audio_support = check_display_audio_support
 
 def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
@@ -530,12 +550,12 @@ def main():
             '-reg', '/opt/airplay/registered_clients.txt'
         ])
 
-        # Check if connected HDMI display has audio capability
+        # Check if connected digital display (HDMI/DisplayPort) has audio capability
         if not has_audio:
-            print(f"[Kiosk] HDMI Audio Check: Thiết bị '{monitor_name}' KHÔNG có loa/âm thanh ({audio_reason}). Tự động tắt quảng bá Audio (-a) để Mac giữ nguyên âm thanh máy tính!")
+            print(f"[Kiosk] Display Audio Check: Thiết bị '{monitor_name}' KHÔNG có loa/âm thanh ({audio_reason}). Tự động tắt quảng bá Audio (-a) để thiết bị phát giữ nguyên âm thanh loa máy tính!")
             extra_flags.append('-a')
         else:
-            print(f"[Kiosk] HDMI Audio Check: Thiết bị '{monitor_name}' CÓ hỗ trợ âm thanh HDMI ({audio_reason}). Bật tính năng Audio AirPlay.")
+            print(f"[Kiosk] Display Audio Check: Thiết bị '{monitor_name}' CÓ hỗ trợ âm thanh số HDMI/DP ({audio_reason}). Bật tính năng Audio AirPlay.")
 
         cmd = [
             'stdbuf', '-oL', '-eL',

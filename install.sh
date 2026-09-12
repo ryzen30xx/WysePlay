@@ -280,6 +280,52 @@ XWRAP_EOF
 }
 
 # ==============================================================================
+# BUILD & INSTALL OPTIMIZED UXPLAY (UNIVERSAL ACROSS ALL CPU ARCHITECTURES)
+# ==============================================================================
+
+build_and_install_custom_uxplay() {
+    log_step "Biên dịch và cài đặt UxPlay tối ưu hoá (Auto-Audio & Zero-Latency) cho mọi CPU..."
+
+    # Check if UxPlay already has our customizations (-noaudio flag)
+    if command -v uxplay >/dev/null 2>&1 && uxplay -h 2>&1 | grep -q "noaudio"; then
+        log_success "Hệ thống đã có sẵn bản UxPlay tối ưu hoá. Bỏ qua bước biên dịch."
+        return 0
+    fi
+
+    log_info "Cài đặt các gói công cụ biên dịch mã nguồn..."
+    BUILD_DEPS=(
+        cmake
+        build-essential
+        pkg-config
+        git
+        libssl-dev
+        libplist-dev
+        libavahi-compat-libdnssd-dev
+        libgstreamer1.0-dev
+        libgstreamer-plugins-base1.0-dev
+    )
+    apt-get install -y --no-install-recommends "${BUILD_DEPS[@]}"
+
+    UXPLAY_BUILD_DIR=$(mktemp -d /tmp/uxplay_build_XXXXXX)
+    log_info "Tải mã nguồn UxPlay v1.71 và áp dụng bản vá tính năng chung..."
+    git clone https://github.com/FDH2/UxPlay.git "${UXPLAY_BUILD_DIR}"
+    (
+        cd "${UXPLAY_BUILD_DIR}"
+        git checkout a67e08f6d58e5e1078abb350103e6c6baff67e7e
+        if [[ -f "${SOURCE_DIR}/patches/uxplay_customizations.patch" ]]; then
+            log_info "Áp dụng bản vá: patches/uxplay_customizations.patch"
+            git apply "${SOURCE_DIR}/patches/uxplay_customizations.patch"
+        fi
+        mkdir -p build && cd build
+        cmake ..
+        make -j$(nproc 2>/dev/null || echo 2)
+        make install
+    )
+    rm -rf "${UXPLAY_BUILD_DIR}"
+    log_success "Đã biên dịch và cài đặt thành công UxPlay tối ưu hoá vào /usr/local/bin/uxplay!"
+}
+
+# ==============================================================================
 # INSTALL APPLE SAN FRANCISCO FONTS
 # ==============================================================================
 
@@ -426,6 +472,7 @@ main() {
     run_preflight_checks
     resolve_source_directory
     install_dependencies
+    build_and_install_custom_uxplay
     install_apple_fonts
     deploy_application
     benchmark_hardware_decoding
