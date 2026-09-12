@@ -578,36 +578,55 @@ def main():
         else:
             print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps")
 
-        # Determine if running specifically on Allwinner H313/H616 platform
-        is_h313_h616 = is_allwinner_h313_h616(profile)
-        if is_h313_h616:
-            # Check user preference from /opt/airplay/x96q_config.json
-            x96q_cfg_path = "/opt/airplay/x96q_config.json"
-            x96q_mode = "smooth_720p"
-            x96q_res = "1280x720"
-            if os.path.exists(x96q_cfg_path):
+        # 3. Check user display mode preference (/opt/airplay/display_mode.json or legacy /opt/airplay/x96q_config.json)
+        disp_mode_file = "/opt/airplay/display_mode.json"
+        legacy_mode_file = "/opt/airplay/x96q_config.json"
+        user_disp_cfg = {}
+        for cfg_path in (disp_mode_file, legacy_mode_file):
+            if os.path.exists(cfg_path):
                 try:
-                    with open(x96q_cfg_path, "r") as xf:
-                        xc = json.load(xf)
-                        x96q_res = xc.get("resolution", "1280x720")
-                        x96q_mode = xc.get("mode", "smooth_720p")
+                    with open(cfg_path, "r") as xf:
+                        user_disp_cfg = json.load(xf)
+                        break
                 except Exception:
                     pass
 
-            if x96q_mode == "sharp_1080p" or x96q_res == "1920x1080":
-                target_res = res if (res and res not in ("None", "Unknown")) else "1920x1080"
-                stream_fps = 60
-                decoder = "v4l2slh264dec"
-                print(f"[Kiosk] Profile Allwinner H313/H616 (Chế độ 1080p Sắc nét 1:1): Stream {target_res}@{stream_fps}fps (Lưu ý: Tốc độ tối đa ~13 FPS do giới hạn băng thông GPU Mali-G31)")
-            else:
-                target_res = "1280x720"
-                stream_fps = 60
-                decoder = "v4l2slh264dec"
-                print(f"[Kiosk] Profile Allwinner H313/H616 (Chế độ 720p Mượt mà - Khuyên dùng): Stream {target_res}@{stream_fps}fps (Hardware upscaled to {res}, 35-40+ FPS)")
+        disp_mode = user_disp_cfg.get("mode", "")
+        disp_res = user_disp_cfg.get("resolution", "")
+
+        if disp_mode == "smooth_720p" or disp_res == "1280x720":
+            target_res = "1280x720"
+            stream_fps = 60
+            print(f"[Kiosk] Chế độ 720p Mượt mà (Smooth): Stream 1280x720@60fps (Hardware upscaled to {res}, tối ưu băng thông chuột 40-60 FPS)")
+        elif disp_mode == "sharp_1080p" or disp_res == "1920x1080":
+            target_res = "1920x1080"
+            stream_fps = 60
+            print(f"[Kiosk] Chế độ 1080p Sắc nét (Sharp 1:1): Stream 1920x1080@60fps")
+        elif disp_mode == "ultra_4k" or disp_res == "3840x2160":
+            target_res = "3840x2160"
+            stream_fps = 60
+            target_h265 = True
+            print(f"[Kiosk] Chế độ 4K Ultra HD: Stream 3840x2160@60fps (H.265)")
         else:
-            # Generic / higher-end hardware: keep benchmarked framerate and configurations
-            target_res = res if (res and res not in ("None", "Unknown")) else sp.get("resolution", "1920x1080")
+            # Automatic based on benchmark profile
             stream_fps = int(target_fps) if target_fps else 60
+            print(f"[Kiosk] Cấu hình tự động theo Benchmark Profile: Stream {target_res}@{stream_fps}fps")
+
+        # 4. Select the optimal decoder for target architecture
+        soc_platform = (profile.get("soc_platform") if profile else "") or ""
+        if not soc_platform and is_allwinner_h313_h616(profile):
+            soc_platform = "allwinner"
+
+        if soc_platform == "allwinner":
+            decoder = "v4l2slh264dec"
+        elif soc_platform in ("intel", "amd", "x86_generic"):
+            if decoder not in ("vaapih264dec", "vaapih265dec"):
+                decoder = "avdec_h264"
+        elif soc_platform == "raspberrypi":
+            if os.path.exists("/dev/video10") or os.path.exists("/dev/video11"):
+                decoder = "v4l2h264dec"
+            else:
+                decoder = "avdec_h264"
 
         # Automatic Fail-Safe: If hardware decoder previously crashed, force CPU decoder
         if hw_fallback_active:

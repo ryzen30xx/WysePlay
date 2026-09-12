@@ -262,7 +262,7 @@ def get_gpu_utilization():
 # GPU & DISPLAY RENDER THROUGHPUT BENCHMARKING
 # ==============================================================================
 
-def get_gpu_info():
+def get_gpu_info(soc_platform="generic"):
     """
     Universal GPU detection across x86_64, ARM, and all Linux platforms.
     Reads DRM uevents, sysfs, and lspci.
@@ -305,11 +305,48 @@ def get_gpu_info():
         except Exception:
             pass
 
-    # 3. Refine Mali / ARM models
+    # 3. Refine Raspberry Pi Broadcom VideoCore
+    if "vc4" in gpu_info["driver"] or "bcm2835" in soc_platform:
+        gpu_info["vendor"] = "Broadcom"
+        gpu_info["model"] = "VideoCore IV (VC4)"
+    elif "v3d" in gpu_info["driver"] or "bcm2711" in soc_platform:
+        gpu_info["vendor"] = "Broadcom"
+        gpu_info["model"] = "VideoCore VI (V3D)"
+    elif "bcm2712" in soc_platform:
+        gpu_info["vendor"] = "Broadcom"
+        gpu_info["model"] = "VideoCore VII"
+
+    # 4. Refine Mali / ARM models
     if "panfrost" in gpu_info["driver"] or "mali" in gpu_info["model"].lower():
         gpu_info["vendor"] = "ARM"
         if "h616" in gpu_info["model"] or "h313" in gpu_info["model"] or "bifrost" in gpu_info["model"]:
             gpu_info["model"] = "Mali-G31 MP2 (Panfrost)"
+        elif "g52" in gpu_info["model"]:
+            gpu_info["model"] = "Mali-G52 MP2 (Panfrost)"
+        elif "t860" in gpu_info["model"]:
+            gpu_info["model"] = "Mali-T860 MP4 (Panfrost)"
+        elif "g610" in gpu_info["model"] or "rk3588" in soc_platform:
+            gpu_info["model"] = "Mali-G610 MP4 (Panfrost)"
+        elif "450" in gpu_info["model"] or "400" in gpu_info["model"] or "lima" in gpu_info["driver"]:
+            gpu_info["model"] = "Mali-450 / Lima (Utgard)"
+
+    # 5. Refine Intel Atom & Low-power x86 models
+    if "intel" in gpu_info["vendor"].lower() or "intel" in gpu_info["model"].lower():
+        m_lower = gpu_info["model"].lower()
+        if any(k in m_lower for k in ("cherryview", "e8000", "x5-z8350", "atom")):
+            gpu_info["model"] = "Intel HD Graphics 400 (Cherryview / Atom)"
+        elif any(k in m_lower for k in ("bay trail", "z3735")):
+            gpu_info["model"] = "Intel HD Graphics (Bay Trail)"
+        elif any(k in m_lower for k in ("j4105", "j4125", "n4000", "n4100", "uhd 600")):
+            gpu_info["model"] = "Intel UHD Graphics 600 (Gemini Lake)"
+
+    # 6. Refine AMD Thin Clients
+    if "amd" in gpu_info["vendor"].lower() or "radeon" in gpu_info["model"].lower():
+        m_lower = gpu_info["model"].lower()
+        if any(k in m_lower for k in ("gx-212", "gx-217", "r2", "8280")):
+            gpu_info["model"] = "AMD Radeon R2 / HD 8280E (G-Series APU)"
+        elif any(k in m_lower for k in ("gx-420", "r6e")):
+            gpu_info["model"] = "AMD Radeon R6E (G-Series GX-420GI)"
 
     return gpu_info
 
@@ -380,25 +417,47 @@ def estimate_gpu_fillrate_mps(gpu_info, soc_platform="generic"):
     """
     model = (gpu_info.get("model") or "").lower()
     driver = (gpu_info.get("driver") or "").lower()
+    vendor = (gpu_info.get("vendor") or "").lower()
 
-    # Ultra-budget ARM GPUs (Mali-400, Mali-450, Mali-G31, VideoCore IV)
-    if "g31" in model or "mali-g31" in model or "h313" in soc_platform or "h616" in soc_platform:
-        return 35.0  # ~35 Mpixels/sec (~14 FPS at 1080p, ~39 FPS at 720p, ~65 FPS at 540p)
-    if "mali-400" in model or "mali-450" in model:
+    # 1. Constrained / Ultra-budget ARM GPUs (render < 25 FPS at 1080p, ~40-50 FPS at 720p):
+    if any(k in model for k in ("mali-400", "mali-450", "utgard")):
         return 20.0
-    if "videocore iv" in model:
-        return 30.0
+    if any(k in model for k in ("g31", "mali-g31")) or "h313" in soc_platform or "h616" in soc_platform:
+        return 35.0  # ~35 Mpixels/sec (~14-16 FPS at 1080p, ~39-44 FPS at 720p)
+    if "videocore iv" in model or "vc4" in driver or "bcm2835" in soc_platform:
+        return 30.0  # Raspberry Pi 1, 2, 3, Zero
 
-    # Mid-range ARM GPUs (Mali-G52, VideoCore VI, Mali-T860, RK3399)
-    if "g52" in model or "videocore vi" in model or "rk3399" in soc_platform or "rk3566" in soc_platform:
+    # 2. Constrained x86 Thin Clients (render < 25 FPS at 1080p, ~45-55 FPS at 720p):
+    # Dell Wyse 3040 (Intel Atom x5-Z8350 / Cherryview / HD 400)
+    # HP T520 (AMD GX-212JC), HP T620 (AMD GX-217GA)
+    if any(k in model for k in ("cherryview", "bay trail", "atom", "x5-z8350", "e8000", "hd graphics 400", "z3735")):
+        return 45.0  # ~21.7 FPS at 1080p, ~48.8 FPS at 720p
+    if any(k in model for k in ("gx-212", "gx-217", "hd 6250", "hd 6310", "hd 7310", "hd 8280", "radeon r2")):
+        return 45.0
+
+    # 3. Mid-range ARM GPUs (render ~55-60 FPS at 1080p):
+    # Raspberry Pi 4 (VideoCore VI / V3D), Mali-G52, RK3399, RK3566
+    if any(k in model for k in ("g52", "mali-g52", "t860", "rk3399", "rk3566", "rk3568")):
+        return 120.0
+    if "videocore vi" in model or "v3d" in driver or "bcm2711" in soc_platform:
         return 120.0
 
-    # x86_64 Integrated / Discrete GPUs (Intel HD/UHD/Iris, AMD Radeon, Nvidia)
-    if "intel" in model or "i915" in driver:
-        return 250.0
-    if "radeon" in model or "amdgpu" in driver or "amd" in model:
-        return 200.0
-    if "nvidia" in model or "nouveau" in driver:
+    # 4. High-Performance ARM GPUs (render 60+ FPS at 1080p / 4K):
+    # Raspberry Pi 5 (VideoCore VII), Mali-G610 (Rockchip RK3588)
+    if any(k in model for k in ("g610", "rk3588", "videocore vii", "bcm2712")):
+        return 220.0
+
+    # 5. Standard / Modern x86_64 GPUs:
+    # Dell Wyse 5070 (Celeron J4105 / UHD 600), HP T630 (AMD GX-420GI / Radeon R6E)
+    if "intel" in vendor or "intel" in model or "i915" in driver:
+        if any(k in model for k in ("uhd 600", "uhd 605", "hd 500", "hd 505", "j4105", "j4125", "n4000", "n4020", "n4100")):
+            return 140.0  # Gánh 1080p60 (~68 FPS) mượt mà
+        return 250.0  # Core i3/i5/i7/N100/Iris Xe: gánh 1080p/4K thoải mái
+    if "amd" in vendor or "radeon" in model or "amdgpu" in driver:
+        if "gx-420" in model or "r6e" in model:
+            return 140.0
+        return 220.0
+    if "nvidia" in vendor or "nouveau" in driver:
         return 300.0
 
     return 150.0
@@ -951,7 +1010,7 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
     # Calculate effective FPS: the REAL framerate seen by the user on screen!
     effective_fps = min(best_fps, fps_render)
     passed_60 = effective_fps >= 55.0
-    passed_30 = effective_fps >= 28.0
+    passed_30 = effective_fps >= 23.0
 
     print(f"      ↳ {C_BOLD}TỐC ĐỘ THỰC TẾ: {effective_fps:.1f} FPS{C_RESET} (Giải mã: {best_fps:.1f} FPS | GPU Xuất hình: {fps_render:.1f} FPS)")
     if fps_render < 28.0 and best_fps >= 28.0:
@@ -992,7 +1051,7 @@ def benchmark_hardware():
     """
     cpu = get_cpu_info()
     soc_platform = detect_soc_platform()
-    gpu_info = get_gpu_info()
+    gpu_info = get_gpu_info(soc_platform)
     cma_info = check_cma_memory(soc_platform)
     best_sink = detect_best_video_sink()
 
@@ -1077,6 +1136,21 @@ def benchmark_hardware():
     p1080 = results.get("1080p", {"passed_60": False, "passed_30": False, "fps": 0.0, "decoder": decoders["sw_h264"], "telemetry": {}, "is_hw": False})
     p720 = results.get("720p", {"passed_60": False, "passed_30": False, "fps": 0.0, "decoder": decoders["sw_h264"], "telemetry": {}, "is_hw": False})
 
+    # Universal Device Classification & GPU Bottleneck Analysis
+    render_1080_fps = p1080.get("render_fps", 60.0)
+    decode_1080_fps = p1080.get("decode_fps", 60.0)
+    is_gpu_constrained = (render_1080_fps < 30.0)
+
+    if is_gpu_constrained:
+        device_class = "constrained"
+        recommended_mode = "smooth_720p"
+    elif p4k.get("passed_60") and not p4k.get("thermal_warning"):
+        device_class = "high_performance"
+        recommended_mode = "ultra_4k"
+    else:
+        device_class = "standard"
+        recommended_mode = "sharp_1080p"
+
     # Decision tree:
     if p4k["passed_60"] and not p4k.get("thermal_warning"):
         hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p4k["is_hw"] else " [CPU]"
@@ -1090,7 +1164,7 @@ def benchmark_hardware():
             "reason": f"Giải mã 4K H.265 đạt {p4k['fps']} FPS (vượt ngưỡng 60 FPS) qua {p4k['decoder']}. Hỗ trợ 4K native và downscale siêu nét cho màn hình 2K/1080p."
         }
         chosen_decoder = p4k["decoder"]
-    elif p1080["passed_60"] and not p1080.get("thermal_warning"):
+    elif p1080["passed_60"] and not p1080.get("thermal_warning") and not is_gpu_constrained:
         hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p1080["is_hw"] else " [CPU]"
         selected = {
             "resolution": "1920x1080",
@@ -1102,17 +1176,17 @@ def benchmark_hardware():
             "reason": f"1080p đạt {p1080['fps']} FPS chuẩn 60 FPS qua {p1080['decoder']} (CPU: {p1080['telemetry'].get('cpu_avg', 0)}%). Đạt độ nét và độ mượt tối đa."
         }
         chosen_decoder = p1080["decoder"]
-    elif p720["passed_60"]:
+    elif is_gpu_constrained or p720["passed_60"] or p720["passed_30"]:
         hw_tag = f" [{soc_platform.upper()} Phần cứng]" if p720["is_hw"] else " [CPU]"
-        thermal_note = " (1080p bị cảnh báo quá tải/quá nhiệt)" if p1080.get("thermal_warning") else ""
+        gpu_note = f" (Nút thắt GPU tại 1080p: ~{render_1080_fps:.1f} FPS)" if is_gpu_constrained else ""
         selected = {
             "resolution": "1280x720",
             "width": 1280,
             "height": 720,
             "max_fps": 60,
             "h265": False,
-            "tier": f"HD Ready @ 60 FPS{hw_tag}",
-            "reason": f"Ưu tiên 720p @ 60 FPS ({p720['fps']} FPS qua {p720['decoder']}){thermal_note} để bảo đảm trải nghiệm vuốt chạm phản hồi tức thì, máy mát và không giật lag."
+            "tier": f"HD Ready 720p @ 60 FPS{hw_tag}",
+            "reason": f"Chọn 720p @ 60 FPS ({p720['fps']} FPS qua {p720['decoder']}){gpu_note} upscale phần cứng để bảo đảm con trỏ chuột lướt cực mượt, không giật khựng."
         }
         chosen_decoder = p720["decoder"]
     elif p4k["passed_30"]:
@@ -1201,6 +1275,9 @@ def benchmark_hardware():
         "gpu": gpu_info,
         "cma": cma_info,
         "soc_platform": soc_platform,
+        "device_class": device_class,
+        "gpu_constrained": is_gpu_constrained,
+        "recommended_mode": recommended_mode,
         "decoder": chosen_decoder,
         "video_sink": best_sink,
         "benchmarks": results,
@@ -1211,6 +1288,10 @@ def benchmark_hardware():
 
 def fallback_profile(cpu, soc_platform="generic"):
     """Fallback profile based purely on core count if benchmark files unavailable."""
+    is_constrained = (cpu["cores"] <= 2)
+    device_class = "constrained" if is_constrained else "standard"
+    recommended_mode = "smooth_720p" if is_constrained else "sharp_1080p"
+
     if cpu["cores"] >= 8:
         res, fps, h265 = "3840x2160", 60, True
         tier = "4K Ultra HD @ 60 FPS"
@@ -1229,6 +1310,9 @@ def fallback_profile(cpu, soc_platform="generic"):
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "cpu": cpu,
         "soc_platform": soc_platform,
+        "device_class": device_class,
+        "gpu_constrained": is_constrained,
+        "recommended_mode": recommended_mode,
         "decoder": "avdec_h265" if h265 else "avdec_h264",
         "video_sink": "autovideosink",
         "benchmarks": {},
@@ -1285,7 +1369,10 @@ def print_summary(profile_data):
     print(f"\n{C_BOLD}----------------------------------------------------------------------{C_RESET}")
     print(f"{C_BOLD}{C_GREEN}  🎉 KẾT QUẢ TỐI ƯU HÓA CẤU HÌNH AIRPLAY (UXPLAY):{C_RESET}")
     print(f"{C_BOLD}----------------------------------------------------------------------{C_RESET}")
+    d_class = profile_data.get("device_class", "standard").upper()
+    gpu_c = "CÓ (Khuyến nghị 720p Mượt mà)" if profile_data.get("gpu_constrained") else "KHÔNG (Đủ sức gánh 1080p/4K)"
     print(f"  • Nền tảng SoC:       {C_CYAN}{soc}{C_RESET}")
+    print(f"  • Phân loại thiết bị: {C_BOLD}{d_class}{C_RESET} (Nút thắt GPU: {gpu_c})")
     print(f"  • Cấu hình lựa chọn:  {C_BOLD}{C_GREEN}{sp['tier']}{C_RESET}")
     print(f"  • Độ phân giải tối đa: {C_CYAN}{sp['resolution']}{C_RESET}")
     print(f"  • Tốc độ khung hình:   {C_CYAN}{sp['max_fps']} FPS{C_RESET}")

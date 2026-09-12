@@ -19,8 +19,14 @@ sudo sysctl -w net.core.rmem_default=4194304 2>/dev/null || true
 sudo sysctl -w net.core.wmem_max=16777216 2>/dev/null || true
 sudo sysctl -w net.ipv4.udp_rmem_min=16384 2>/dev/null || true
 
-# Ensure multicast route exists on active interface so mDNS announcements reach all Wi-Fi clients
-sudo ip route replace 224.0.0.0/4 dev wlan0 2>/dev/null || sudo ip route add 224.0.0.0/4 dev wlan0 2>/dev/null || true
+# Ensure multicast route exists on active interface so mDNS announcements reach all AirPlay clients
+DEF_IFACE=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
+if [ -n "$DEF_IFACE" ]; then
+    sudo ip route replace 224.0.0.0/4 dev "$DEF_IFACE" 2>/dev/null || true
+fi
+if ip link show wlan0 >/dev/null 2>&1 && [ "$DEF_IFACE" != "wlan0" ]; then
+    sudo ip route add 224.0.0.0/4 dev wlan0 2>/dev/null || true
+fi
 
 PID_XRADIO=$(pgrep -f xradio_bh || true)
 if [ -n "$PID_XRADIO" ]; then
