@@ -40,6 +40,7 @@ log_error()   { echo -e "${C_RED}✖  ${1}${C_RESET}" >&2; }
 # --- Arguments & Flags ---
 AUTO_START=true
 SPECIFIED_USER=""
+SPECIFIED_MODE=""
 REPO_URL="https://github.com/ryzen30xx/WysePlay.git"
 RAW_BASE_URL="https://raw.githubusercontent.com/ryzen30xx/WysePlay/main"
 TEMP_DIR=""
@@ -54,6 +55,7 @@ Usage:
 
 Options:
   --user <username>   Specify target Linux user (default: current sudo user or UID 1000)
+  --mode <720p|1080p> Select profile for X96Q (720p=smooth 40fps [recommended], 1080p=sharp 13fps)
   --no-start          Do not start the airplay-kiosk service immediately after installation
   -h, --help          Show this help message
 HELP_EOF
@@ -64,6 +66,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --user)
             SPECIFIED_USER="$2"
+            shift 2
+            ;;
+        --mode|--x96q-mode)
+            SPECIFIED_MODE="$2"
             shift 2
             ;;
         --no-start)
@@ -379,11 +385,120 @@ deploy_application() {
 }
 
 # ==============================================================================
-# BENCHMARK HARDWARE DECODING (CPU/GPU)
+# X96Q / ALLWINNER H313 DEDICATED TUNING & OPTIONS
+# ==============================================================================
+
+is_x96q_device() {
+    # 1. Device Tree check
+    if [[ -f /proc/device-tree/compatible ]]; then
+        local compat
+        compat=$(tr '\0' ' ' < /proc/device-tree/compatible 2>/dev/null | tr '[:upper:]' '[:lower:]')
+        if [[ "$compat" == *"x96q"* ]] || [[ "$compat" == *"sun50i-h313"* ]] || [[ "$compat" == *"sun50i-h616"* ]] || [[ "$compat" == *"allwinner"* ]]; then
+            return 0
+        fi
+    fi
+    # 2. Armbian release check
+    if [[ -f /etc/armbian-release ]]; then
+        local armb
+        armb=$(tr '[:upper:]' '[:lower:]' < /etc/armbian-release 2>/dev/null)
+        if [[ "$armb" == *"x96q"* ]] || [[ "$armb" == *"h616"* ]] || [[ "$armb" == *"h313"* ]] || [[ "$armb" == *"sun50i"* ]]; then
+            return 0
+        fi
+    fi
+    # 3. Hostname check
+    if [[ "$(hostname 2>/dev/null | tr '[:upper:]' '[:lower:]')" == *"x96q"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
+configure_x96q_options() {
+    log_step "Phát hiện thiết bị X96Q (Allwinner H313/H616). Đang tối ưu hoá chuyên biệt..."
+
+    # 1. Tự động kiểm tra và cấu hình bộ nhớ CMA lên 192M cho VPU Allwinner Cedrus
+    if [[ -f /boot/armbianEnv.txt ]]; then
+        if ! grep -q "cma=" /boot/armbianEnv.txt; then
+            log_info "Cấu hình bộ nhớ CMA lên 192MB trong /boot/armbianEnv.txt (chống tràn đệm VPU)..."
+            if grep -q "^extraargs=" /boot/armbianEnv.txt; then
+                sed -i 's/^extraargs=\(.*\)$/extraargs=\1 cma=192M/' /boot/armbianEnv.txt
+            else
+                echo "extraargs=cma=192M" >> /boot/armbianEnv.txt
+            fi
+            log_success "Đã cấu hình cma=192M vào /boot/armbianEnv.txt"
+        else
+            log_success "Bộ nhớ CMA đã được tối ưu trong /boot/armbianEnv.txt"
+        fi
+    fi
+
+    # 2. Đưa ra 2 tùy chọn hiển thị cho người dùng
+    echo ""
+    echo -e "${C_BOLD}${C_YELLOW}┌────────────────────────────────────────────────────────────────────┐${C_RESET}"
+    echo -e "${C_BOLD}${C_YELLOW}│  📺 CHỌN CHẾ ĐỘ HIỂN THỊ DÀNH RIÊNG CHO THIẾT BỊ X96Q TV BOX       │${C_RESET}"
+    echo -e "${C_BOLD}${C_YELLOW}└────────────────────────────────────────────────────────────────────┘${C_RESET}"
+    echo -e "  Chip đồ họa GPU Mali-G31 trên X96Q có giới hạn băng thông bộ nhớ khi xuất hình:"
+    echo ""
+    echo -e "  ${C_BOLD}${C_GREEN}[1] 720p @ 60fps (MƯỢT MÀ - KHUYẾN NGHỊ)${C_RESET}"
+    echo -e "      • Stream AirPlay ở mức 1280x720@60, GPU tự động upscale tràn màn hình 1080p."
+    echo -e "      • Tốc độ hiển thị đạt ${C_BOLD}35-40+ FPS${C_RESET}, con trỏ chuột lướt cực mượt, không giật khựng."
+    echo -e "      • Màn hình TV vẫn giữ nguyên chuẩn Full HD 1080p sắc nét."
+    echo ""
+    echo -e "  ${C_BOLD}${C_CYAN}[2] 1080p @ 60fps (SẮC NÉT 1:1 - NHƯNG GIẬT LAG)${C_RESET}"
+    echo -e "      • Stream chuẩn Full HD 1920x1080 sắc nét từng pixel 1:1."
+    echo -e "      • Tốc độ hiển thị tối đa bị nghẽn ở ${C_RED}~13 FPS${C_RESET} do giới hạn fillrate của GPU Mali-G31."
+    echo -e "      • Chuột có hiện tượng nhảy bước / giật khựng nhẹ khi di chuyển nhanh."
+    echo ""
+
+    local choice=""
+    if [[ -n "${SPECIFIED_MODE:-}" ]]; then
+        case "${SPECIFIED_MODE}" in
+            1080p|1080|sharp) choice="2" ;;
+            720p|720|smooth) choice="1" ;;
+            *) choice="1" ;;
+        esac
+    elif [[ -t 0 ]]; then
+        read -r -p "  👉 Vui lòng chọn chế độ [1/2] (Mặc định: 1 - Mượt mà): " user_input
+        case "$user_input" in
+            2) choice="2" ;;
+            *) choice="1" ;;
+        esac
+    else
+        log_info "Cài đặt chạy nền không tương tác (non-interactive): Mặc định chọn [1] 720p Mượt mà."
+        choice="1"
+    fi
+
+    mkdir -p "${APP_DIR}"
+    if [[ "$choice" == "2" ]]; then
+        log_success "Đã áp dụng: Chế độ 1080p @ 60fps (Sắc nét 1:1, ~13 FPS)"
+        cat << 'X96Q_CFG' > "${APP_DIR}/x96q_config.json"
+{
+  "device": "x96q",
+  "resolution": "1920x1080",
+  "max_fps": 60,
+  "mode": "sharp_1080p",
+  "description": "Full HD 1080p 1:1 pixel (13 FPS GPU-bound, sharper text)"
+}
+X96Q_CFG
+    else
+        log_success "Đã áp dụng: Chế độ 720p @ 60fps (Mượt mà 40 FPS - Khuyên dùng)"
+        cat << 'X96Q_CFG' > "${APP_DIR}/x96q_config.json"
+{
+  "device": "x96q",
+  "resolution": "1280x720",
+  "max_fps": 60,
+  "mode": "smooth_720p",
+  "description": "HD 720p hardware upscaled to 1080p (35-40+ FPS, ultra smooth mouse)"
+}
+X96Q_CFG
+    fi
+    chown "${TARGET_USER}:${TARGET_GROUP}" "${APP_DIR}/x96q_config.json" 2>/dev/null || true
+}
+
+# ==============================================================================
+# BENCHMARK HARDWARE DECODING (GENERIC CPU / GPU)
 # ==============================================================================
 
 benchmark_hardware_decoding() {
-    log_step "Đo kiểm hiệu năng giải mã phần cứng CPU/GPU (Mục tiêu 60 FPS)..."
+    log_step "Đo kiểm hiệu năng giải mã CPU & năng lực xuất hình GPU (Generic x86 / ARM)..."
 
     if [[ -f "${APP_DIR}/benchmark_decoder.py" ]]; then
         python3 "${APP_DIR}/benchmark_decoder.py" --force
@@ -475,7 +590,11 @@ main() {
     build_and_install_custom_uxplay
     install_apple_fonts
     deploy_application
-    benchmark_hardware_decoding
+    if is_x96q_device; then
+        configure_x96q_options
+    else
+        benchmark_hardware_decoding
+    fi
     configure_user_environment
     configure_systemd_service
 
@@ -488,7 +607,21 @@ main() {
     echo -e "  • Thư mục cài đặt:   ${C_CYAN}/opt/airplay${C_RESET}"
     echo -e "  • Người dùng Kiosk:   ${C_CYAN}${TARGET_USER}${C_RESET}"
     echo -e "  • Tên dịch vụ:        ${C_CYAN}airplay-kiosk.service${C_RESET}"
-    if [[ -f /opt/airplay/hw_profile.json ]]; then
+    if [[ -f /opt/airplay/x96q_config.json ]]; then
+        X96Q_INFO=$(python3 -c "
+import json
+try:
+    with open('/opt/airplay/x96q_config.json') as f:
+        d = json.load(f)
+        mode = '720p Mượt mà (Upscale 1080p, 40 FPS)' if d.get('mode') == 'smooth_720p' else '1080p Sắc nét (1:1 native, ~13 FPS)'
+        print(f\"{mode} [{d.get('resolution')} @ {d.get('max_fps')}fps]\")
+except Exception:
+    pass
+" 2>/dev/null || true)
+        if [[ -n "$X96Q_INFO" ]]; then
+            echo -e "  • Cấu hình X96Q:      ${C_GREEN}${X96Q_INFO}${C_RESET}"
+        fi
+    elif [[ -f /opt/airplay/hw_profile.json ]]; then
         PROFILE_INFO=$(python3 -c "
 import json
 try:

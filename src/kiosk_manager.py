@@ -581,11 +581,29 @@ def main():
         # Determine if running specifically on Allwinner H313/H616 platform
         is_h313_h616 = is_allwinner_h313_h616(profile)
         if is_h313_h616:
-            # Match native physical monitor resolution (e.g. 1920x1080 Full HD) for sharp 1:1 display
-            target_res = res if (res and res not in ("None", "Unknown")) else sp.get("resolution", "1920x1080")
-            stream_fps = int(target_fps) if target_fps else 60
-            decoder = "v4l2slh264dec"
-            print(f"[Kiosk] Profile Allwinner H313/H616: Native {target_res}@{stream_fps}fps (HW VPU {decoder}, zero-copy DMABUF, vsync no, zero-delay leaky queue)")
+            # Check user preference from /opt/airplay/x96q_config.json
+            x96q_cfg_path = "/opt/airplay/x96q_config.json"
+            x96q_mode = "smooth_720p"
+            x96q_res = "1280x720"
+            if os.path.exists(x96q_cfg_path):
+                try:
+                    with open(x96q_cfg_path, "r") as xf:
+                        xc = json.load(xf)
+                        x96q_res = xc.get("resolution", "1280x720")
+                        x96q_mode = xc.get("mode", "smooth_720p")
+                except Exception:
+                    pass
+
+            if x96q_mode == "sharp_1080p" or x96q_res == "1920x1080":
+                target_res = res if (res and res not in ("None", "Unknown")) else "1920x1080"
+                stream_fps = 60
+                decoder = "v4l2slh264dec"
+                print(f"[Kiosk] Profile Allwinner H313/H616 (Chế độ 1080p Sắc nét 1:1): Stream {target_res}@{stream_fps}fps (Lưu ý: Tốc độ tối đa ~13 FPS do giới hạn băng thông GPU Mali-G31)")
+            else:
+                target_res = "1280x720"
+                stream_fps = 60
+                decoder = "v4l2slh264dec"
+                print(f"[Kiosk] Profile Allwinner H313/H616 (Chế độ 720p Mượt mà - Khuyên dùng): Stream {target_res}@{stream_fps}fps (Hardware upscaled to {res}, 35-40+ FPS)")
         else:
             # Generic / higher-end hardware: keep benchmarked framerate and configurations
             target_res = res if (res and res not in ("None", "Unknown")) else sp.get("resolution", "1920x1080")

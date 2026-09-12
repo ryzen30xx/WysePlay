@@ -258,6 +258,194 @@ def get_gpu_utilization():
             pass
     return None
 
+# ==============================================================================
+# GPU & DISPLAY RENDER THROUGHPUT BENCHMARKING
+# ==============================================================================
+
+def get_gpu_info():
+    """
+    Universal GPU detection across x86_64, ARM, and all Linux platforms.
+    Reads DRM uevents, sysfs, and lspci.
+    """
+    gpu_info = {
+        "driver": "unknown",
+        "model": "unknown",
+        "vendor": "unknown"
+    }
+    # 1. Check DRM devices
+    for uevent_path in glob.glob("/sys/class/drm/card*/device/uevent"):
+        try:
+            with open(uevent_path, "r") as f:
+                for line in f:
+                    if line.startswith("DRIVER="):
+                        drv = line.split("=")[1].strip()
+                        if drv not in ("display-engine", "sun4i-drm"):
+                            gpu_info["driver"] = drv
+                    elif line.startswith("OF_COMPATIBLE_"):
+                        val = line.split("=")[1].strip()
+                        if "mali" in val or "gpu" in val:
+                            gpu_info["model"] = val
+        except Exception:
+            pass
+
+    # 2. If model is still unknown or generic, check lspci for x86 VGA/3D controllers
+    if gpu_info["model"] in ("unknown", "") and shutil.which("lspci"):
+        try:
+            p = subprocess.run(["lspci"], capture_output=True, text=True, timeout=2)
+            for line in p.stdout.splitlines():
+                if "VGA compatible controller" in line or "3D controller" in line:
+                    gpu_info["model"] = line.split(":", 2)[-1].strip()
+                    if "Intel" in line:
+                        gpu_info["vendor"] = "Intel"
+                    elif "AMD" in line or "ATI" in line:
+                        gpu_info["vendor"] = "AMD"
+                    elif "NVIDIA" in line:
+                        gpu_info["vendor"] = "NVIDIA"
+                    break
+        except Exception:
+            pass
+
+    # 3. Refine Mali / ARM models
+    if "panfrost" in gpu_info["driver"] or "mali" in gpu_info["model"].lower():
+        gpu_info["vendor"] = "ARM"
+        if "h616" in gpu_info["model"] or "h313" in gpu_info["model"] or "bifrost" in gpu_info["model"]:
+            gpu_info["model"] = "Mali-G31 MP2 (Panfrost)"
+
+    return gpu_info
+
+
+def check_cma_memory(soc_platform="generic"):
+    """
+    Checks contiguous memory allocation (CMA) pool for VPU hardware decoding.
+    Stateless V4L2 decoders (Cedrus, RKVDEC, Hantro) allocate reference frame
+    buffers from CMA. If CMA is < 128MB, 1080p decoding stalls.
+    """
+    cma_total_kb = 0
+    cma_free_kb = 0
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("CmaTotal:"):
+                    cma_total_kb = int(line.split()[1])
+                elif line.startswith("CmaFree:"):
+                    cma_free_kb = int(line.split()[1])
+    except Exception:
+        return None
+
+    if cma_total_kb == 0:
+        return None
+
+    cma_total_mb = cma_total_kb // 1024
+    cma_free_mb = cma_free_kb // 1024
+
+    return {
+        "cma_total_mb": cma_total_mb,
+        "cma_free_mb": cma_free_mb,
+        "adequate_1080p": cma_total_mb >= 128,
+        "recommended_mb": 192
+    }
+
+
+def detect_best_video_sink():
+    """
+    Detects the highest performing video sink available on the system.
+    Returns sink element string, e.g. 'xvimagesink', 'glimagesink', 'kmssink', or 'autovideosink'.
+    """
+    disp = os.environ.get("DISPLAY") or (":0" if os.path.exists("/tmp/.X11-unix/X0") else None)
+    if disp:
+        env = os.environ.copy()
+        env["DISPLAY"] = disp
+        try:
+            p = subprocess.run(["xvinfo"], capture_output=True, text=True, timeout=2, env=env)
+            if p.returncode == 0 and "Number of image formats" in p.stdout:
+                return "xvimagesink"
+        except Exception:
+            pass
+
+    if not disp and shutil.which("gst-inspect-1.0"):
+        try:
+            p = subprocess.run(["gst-inspect-1.0", "kmssink"], capture_output=True, timeout=2)
+            if p.returncode == 0 and os.path.exists("/dev/dri/card0"):
+                return "kmssink"
+        except Exception:
+            pass
+
+    return "autovideosink"
+
+
+def estimate_gpu_fillrate_mps(gpu_info, soc_platform="generic"):
+    """
+    Returns estimated maximum display fillrate in Megapixels/sec under X11/Mesa.
+    Used when display server is not actively running during benchmark.
+    """
+    model = (gpu_info.get("model") or "").lower()
+    driver = (gpu_info.get("driver") or "").lower()
+
+    # Ultra-budget ARM GPUs (Mali-400, Mali-450, Mali-G31, VideoCore IV)
+    if "g31" in model or "mali-g31" in model or "h313" in soc_platform or "h616" in soc_platform:
+        return 35.0  # ~35 Mpixels/sec (~14 FPS at 1080p, ~39 FPS at 720p, ~65 FPS at 540p)
+    if "mali-400" in model or "mali-450" in model:
+        return 20.0
+    if "videocore iv" in model:
+        return 30.0
+
+    # Mid-range ARM GPUs (Mali-G52, VideoCore VI, Mali-T860, RK3399)
+    if "g52" in model or "videocore vi" in model or "rk3399" in soc_platform or "rk3566" in soc_platform:
+        return 120.0
+
+    # x86_64 Integrated / Discrete GPUs (Intel HD/UHD/Iris, AMD Radeon, Nvidia)
+    if "intel" in model or "i915" in driver:
+        return 250.0
+    if "radeon" in model or "amdgpu" in driver or "amd" in model:
+        return 200.0
+    if "nvidia" in model or "nouveau" in driver:
+        return 300.0
+
+    return 150.0
+
+
+def measure_render_throughput(width, height, sink="xvimagesink", num_buffers=30):
+    """
+    Directly measures the GPU and display sink's actual rendering throughput
+    at (width, height) using real hardware GStreamer pipeline buffers.
+    """
+    disp = os.environ.get("DISPLAY") or (":0" if os.path.exists("/tmp/.X11-unix/X0") else None)
+    if not disp or not shutil.which("gst-launch-1.0"):
+        return None
+
+    cmd = [
+        'gst-launch-1.0', '-v',
+        'videotestsrc', f'num-buffers={num_buffers}',
+        '!', f'video/x-raw,format=I420,width={width},height={height},framerate=60/1',
+        '!', 'fpsdisplaysink', f'video-sink={sink}', 'text-overlay=false', 'sync=false', 'fps-update-interval=10'
+    ]
+    env = os.environ.copy()
+    env["DISPLAY"] = disp
+
+    try:
+        p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=8, env=env)
+        avgs = re.findall(r'average:\s*([0-9.]+)', p.stdout)
+        if avgs:
+            val = float(avgs[-1])
+            if val > 0.0:
+                return round(val, 1)
+    except Exception:
+        pass
+    return None
+
+
+def get_effective_render_fps(width, height, gpu_info, soc_platform, sink="xvimagesink"):
+    """
+    Returns (render_fps, source_str) taking into account actual measurement or hardware fillrate model.
+    """
+    measured = measure_render_throughput(width, height, sink=sink)
+    if measured is not None and measured > 0:
+        return measured, "measured"
+
+    fillrate_mps = estimate_gpu_fillrate_mps(gpu_info, soc_platform)
+    est_fps = (fillrate_mps * 1_000_000.0) / (width * height)
+    return round(est_fps, 1), "estimated"
+
 class TelemetryTracker:
     """Tracks CPU utilization, peak temperature, and GPU usage during benchmark runs."""
     def __init__(self, sample_interval=0.1):
@@ -685,21 +873,26 @@ def print_telemetry_line(decoder_name, fps, telem, is_hw=False):
 # RESOLUTION TIER TESTER WITH VPU AUTO-EVALUATION
 # ==============================================================================
 
-def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="avdec_h264", hw_decoders=None, soc_platform="generic"):
+def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="avdec_h264", hw_decoders=None, soc_platform="generic", gpu_info=None, video_sink="autovideosink"):
     """
-    Tests resolution tier with default decoder. If default decoder does not reach 60fps,
-    or if hardware VPU decoders are available, benchmarks hardware VPU decoders as well,
-    comparing FPS, CPU usage, temperature, and GPU usage to pick the absolute best configuration.
+    Tests resolution tier taking into account BOTH decode throughput (CPU/VPU)
+    AND actual GPU display render throughput. Effective FPS is min(decode, render).
     """
     parser = "h265parse" if codec == "h265" else "h264parse"
     print(f"\n  ▶ Đo kiểm độ phân giải {C_BOLD}{res_label}{C_RESET}...")
 
+    # Determine resolution dimensions
+    res_map = {"4k": (3840, 2160), "1080p": (1920, 1080), "720p": (1280, 720), "540p": (960, 540)}
+    width, height = res_map.get(name, (1920, 1080))
+
+    # Phase 0: Measure / Estimate actual GPU display render throughput
+    fps_render, render_src = get_effective_render_fps(width, height, gpu_info or {}, soc_platform, sink=video_sink)
+    src_label = "Đo đạc hiển thị thực tế" if render_src == "measured" else "Mô hình kiến trúc GPU"
+    print(f"      [GPU] Năng lực xuất hình ({C_CYAN}{gpu_info.get('model', 'Unknown') if gpu_info else 'Unknown'}{C_RESET} qua {video_sink}): {C_BOLD}{fps_render:.1f} FPS{C_RESET} ({src_label})")
+
     # Phase 1: Test with standard/default decoder
     print(f"      [1] Thử nghiệm bộ giải mã mặc định/CPU ({C_CYAN}{default_dec}{C_RESET})...")
     fps_def, telem_def, err_def = run_decode_test(clip_path, default_dec, parser=parser)
-
-    passed_60_def = fps_def >= 58.0
-    passed_30_def = fps_def >= 28.0
 
     print_telemetry_line(default_dec, fps_def, telem_def, is_hw=False)
 
@@ -711,14 +904,10 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
     # Phase 2: If default decoder fails 60 FPS OR if hardware decoders exist, try VPU hardware acceleration!
     tested_hw = []
 
-    if (not passed_60_def) or (hw_decoders and len(hw_decoders) > 0):
+    if (fps_def < 58.0) or (hw_decoders and len(hw_decoders) > 0):
         if not hw_decoders:
-            if soc_platform in ("allwinner", "rockchip", "amlogic"):
-                log_info(f"Tốc độ CPU ({fps_def:.1f} FPS) chưa đạt 60 FPS. Thử kích hoạt VPU phần cứng cho {soc_platform.upper()}...")
-                discovered_map = try_activate_hardware_vpu(soc_platform)
-                hw_decoders = discovered_map.get(codec, [])
-            elif soc_platform in ("intel", "amd", "x86_generic"):
-                log_info(f"Tốc độ CPU ({fps_def:.1f} FPS) chưa đạt 60 FPS. Thử kiểm tra VA-API phần cứng...")
+            if soc_platform in ("allwinner", "rockchip", "amlogic", "intel", "amd", "x86_generic"):
+                log_info(f"Tốc độ CPU ({fps_def:.1f} FPS) chưa đạt 60 FPS. Thử kiểm tra VPU/GPU phần cứng cho {soc_platform.upper()}...")
                 discovered_map = try_activate_hardware_vpu(soc_platform)
                 hw_decoders = discovered_map.get(codec, [])
 
@@ -739,13 +928,13 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
             })
 
             # Compare and evaluate:
-            if fps_hw >= 58.0 and not passed_60_def:
+            if fps_hw >= 58.0 and fps_def < 58.0:
                 best_decoder = hw_dec
                 best_fps = fps_hw
                 best_telem = telem_hw
                 best_is_hw = True
                 log_success(f"          ↳ Phần cứng ({hw_dec}) đã nâng tốc độ lên {fps_hw:.1f} FPS (Đạt chuẩn 60 FPS)!")
-            elif fps_hw >= 58.0 and passed_60_def:
+            elif fps_hw >= 58.0 and fps_def >= 58.0:
                 cpu_saved = telem_def["cpu_avg"] - telem_hw["cpu_avg"]
                 if cpu_saved > 10.0 or (telem_hw.get("temp_peak") and telem_def.get("temp_peak") and telem_hw["temp_peak"] < telem_def["temp_peak"]):
                     best_decoder = hw_dec
@@ -753,11 +942,20 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
                     best_telem = telem_hw
                     best_is_hw = True
                     log_success(f"          ↳ Cả 2 đều đạt 60 FPS nhưng phần cứng ({hw_dec}) giảm tải CPU {cpu_saved:.1f}% và nhiệt độ mát hơn. Chọn phần cứng!")
-            elif (not passed_60_def) and (fps_hw > best_fps or (fps_hw >= 28.0 and telem_hw["cpu_avg"] < best_telem["cpu_avg"])):
+            elif (fps_def < 58.0) and (fps_hw > best_fps or (fps_hw >= 28.0 and telem_hw["cpu_avg"] < best_telem["cpu_avg"])):
                 best_decoder = hw_dec
                 best_fps = fps_hw
                 best_telem = telem_hw
                 best_is_hw = True
+
+    # Calculate effective FPS: the REAL framerate seen by the user on screen!
+    effective_fps = min(best_fps, fps_render)
+    passed_60 = effective_fps >= 55.0
+    passed_30 = effective_fps >= 28.0
+
+    print(f"      ↳ {C_BOLD}TỐC ĐỘ THỰC TẾ: {effective_fps:.1f} FPS{C_RESET} (Giải mã: {best_fps:.1f} FPS | GPU Xuất hình: {fps_render:.1f} FPS)")
+    if fps_render < 28.0 and best_fps >= 28.0:
+        log_warn(f"          ⚠ Nút thắt GPU: Băng thông xuất hình GPU bị giới hạn ({fps_render:.1f} FPS < {best_fps:.1f} FPS giải mã). Sẽ hạ tier để tránh lag chuột.")
 
     # Thermal Warning Guard
     thermal_warning = False
@@ -770,9 +968,11 @@ def test_resolution_tier(name, res_label, clip_path, codec="h264", default_dec="
     return {
         "decoder": best_decoder,
         "is_hw": best_is_hw,
-        "fps": round(best_fps, 1),
-        "passed_60": best_fps >= 58.0,
-        "passed_30": best_fps >= 28.0,
+        "fps": round(effective_fps, 1),
+        "decode_fps": round(best_fps, 1),
+        "render_fps": round(fps_render, 1),
+        "passed_60": passed_60,
+        "passed_30": passed_30,
         "telemetry": best_telem,
         "default_telemetry": telem_def,
         "thermal_warning": thermal_warning,
@@ -792,13 +992,23 @@ def benchmark_hardware():
     """
     cpu = get_cpu_info()
     soc_platform = detect_soc_platform()
+    gpu_info = get_gpu_info()
+    cma_info = check_cma_memory(soc_platform)
+    best_sink = detect_best_video_sink()
 
     print(f"\n{C_BOLD}======================================================================{C_RESET}")
-    print(f"{C_BOLD}  ⚡ WYSEPLAY DECODER PERFORMANCE BENCHMARK (4K -> 1080p -> 720p){C_RESET}")
+    print(f"{C_BOLD}  ⚡ WYSEPLAY DECODER & DISPLAY PERFORMANCE BENCHMARK (4K -> 1080p -> 720p){C_RESET}")
     print(f"{C_BOLD}======================================================================{C_RESET}")
     print(f"  • CPU Model:        {C_CYAN}{cpu['model']}{C_RESET}")
     print(f"  • Kiến trúc / Cores: {C_CYAN}{cpu['arch']} ({cpu['cores']} cores){C_RESET}")
     print(f"  • Nền tảng SoC:     {C_CYAN}{soc_platform.upper()}{C_RESET}")
+    print(f"  • GPU / Driver:     {C_CYAN}{gpu_info['model']} ({gpu_info['driver']}){C_RESET}")
+    print(f"  • Video Sink:       {C_CYAN}{best_sink}{C_RESET}")
+    if cma_info:
+        cma_status = f"{C_GREEN}Tốt ({cma_info['cma_total_mb']} MB){C_RESET}" if cma_info["adequate_1080p"] else f"{C_RED}Thấp ({cma_info['cma_total_mb']} MB < 128 MB){C_RESET}"
+        print(f"  • Bộ nhớ CMA (VPU): {cma_status}")
+        if not cma_info["adequate_1080p"]:
+            log_warn(f"Dung lượng CMA chỉ có {cma_info['cma_total_mb']}MB. Khuyến nghị cấu hình 'extraargs=cma=192M' để tránh cạn bộ nhớ đệm VPU.")
 
     if not shutil.which('gst-launch-1.0'):
         log_warn("Không tìm thấy công cụ GStreamer (gst-launch-1.0). Sử dụng hồ sơ ước tính theo phần cứng CPU...")
@@ -840,7 +1050,8 @@ def benchmark_hardware():
         default_4k_dec = hw_h265[0] if hw_h265 else decoders["sw_h265"]
         results["4k"] = test_resolution_tier(
             "4k", "4K UHD (3840x2160, H.265)", clip_4k,
-            codec="h265", default_dec=default_4k_dec, hw_decoders=hw_h265, soc_platform=soc_platform
+            codec="h265", default_dec=default_4k_dec, hw_decoders=hw_h265, soc_platform=soc_platform,
+            gpu_info=gpu_info, video_sink=best_sink
         )
 
     # Benchmark 1080p (1920x1080, H.264)
@@ -848,7 +1059,8 @@ def benchmark_hardware():
         default_1080_dec = decoders["sw_h264"]
         results["1080p"] = test_resolution_tier(
             "1080p", "1080p Full HD (1920x1080, H.264)", clip_1080p,
-            codec="h264", default_dec=default_1080_dec, hw_decoders=hw_h264, soc_platform=soc_platform
+            codec="h264", default_dec=default_1080_dec, hw_decoders=hw_h264, soc_platform=soc_platform,
+            gpu_info=gpu_info, video_sink=best_sink
         )
 
     # Benchmark 720p (1280x720, H.264)
@@ -856,7 +1068,8 @@ def benchmark_hardware():
         default_720_dec = decoders["sw_h264"]
         results["720p"] = test_resolution_tier(
             "720p", "720p HD Ready (1280x720, H.264)", clip_720p,
-            codec="h264", default_dec=default_720_dec, hw_decoders=hw_h264, soc_platform=soc_platform
+            codec="h264", default_dec=default_720_dec, hw_decoders=hw_h264, soc_platform=soc_platform,
+            gpu_info=gpu_info, video_sink=best_sink
         )
 
     # 4. Profile Decision Logic (Goal: Max 60 FPS, Thermally Safe, Hardware Prioritized)
@@ -985,9 +1198,11 @@ def benchmark_hardware():
     profile_data = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "cpu": cpu,
+        "gpu": gpu_info,
+        "cma": cma_info,
         "soc_platform": soc_platform,
         "decoder": chosen_decoder,
-        "video_sink": "autovideosink",
+        "video_sink": best_sink,
         "benchmarks": results,
         "selected_profile": selected
     }
