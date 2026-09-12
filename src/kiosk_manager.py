@@ -315,6 +315,33 @@ def load_hardware_profile():
         print(f"[Kiosk] Error reading {config_path}: {e}")
         return None
 
+def is_allwinner_h313_h616(profile=None):
+    """Checks if running specifically on Allwinner H313/H616 (Cortex-A53 / low-power XR819 Wi-Fi)."""
+    if profile:
+        soc = str(profile.get("soc_platform", "")).lower()
+        model = str(profile.get("cpu", {}).get("model", "")).lower()
+        if "allwinner" in soc or "sunxi" in soc or "h313" in soc or "h616" in soc:
+            return True
+        if "cortex-a53" in model and profile.get("cpu", {}).get("cores", 0) <= 4:
+            return True
+    try:
+        if os.path.exists("/proc/device-tree/compatible"):
+            with open("/proc/device-tree/compatible", "r") as f:
+                compat = f.read().lower()
+                if "allwinner" in compat or "sun50i" in compat or "x96q" in compat:
+                    return True
+    except Exception:
+        pass
+    try:
+        if os.path.exists("/proc/cpuinfo"):
+            with open("/proc/cpuinfo", "r") as f:
+                info = f.read().lower()
+                if "sunxi" in info or "allwinner" in info:
+                    return True
+    except Exception:
+        pass
+    return False
+
 def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
     os.environ['DISPLAY'] = ':0'
@@ -399,6 +426,21 @@ def main():
         else:
             print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps")
 
+        # Determine if running specifically on Allwinner H313/H616 platform
+        is_h313_h616 = is_allwinner_h313_h616(profile)
+        if is_h313_h616:
+            # Tailored strictly for Allwinner H313/H616 (Quad Cortex-A53 + XR819 2.4GHz Wi-Fi):
+            # 1. Use avdec_h264 with NEON 4-thread acceleration (benchmark: 203 FPS @ 16% CPU)
+            # 2. Cap to 30 FPS to prevent XR819 2.4GHz SDIO bandwidth saturation (~3.8 Mbps) and buffer bloat
+            # 3. Ensure xvimagesink qos=false for zero-copy hardware overlay
+            # 4. Use -vsync no for zero-latency interactive mirroring
+            decoder = "avdec_h264"
+            stream_fps = min(int(target_fps), 30)
+            print(f"[Kiosk] Profile Allwinner H313/H616 phát hiện: Áp dụng cấu hình tối ưu độ trễ thấp (30 FPS, avdec_h264 4T, vsync no)")
+        else:
+            # Generic / higher-end hardware: keep benchmarked framerate and configurations
+            stream_fps = int(target_fps)
+
         # Automatic Fail-Safe: If hardware decoder previously crashed, force CPU decoder
         if hw_fallback_active:
             decoder = "avdec_h264"
@@ -427,9 +469,6 @@ def main():
             '-pin',
             '-reg', '/opt/airplay/registered_clients.txt'
         ])
-
-        # Enforce 30 FPS max streaming to fit within 2.4GHz Wi-Fi bandwidth without buffer bloat
-        stream_fps = min(int(target_fps), 30)
 
         cmd = [
             'stdbuf', '-oL', '-eL',
