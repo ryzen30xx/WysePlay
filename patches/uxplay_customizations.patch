@@ -84,26 +84,10 @@ index c275dc1..946aed2 100644
          retval = -1;
      }	  
 diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
-index 3b2c838..5fbb02f 100644
+index 3b2c838..4cd9458 100644
 --- a/lib/raop_handlers.h
 +++ b/lib/raop_handlers.h
-@@ -68,6 +68,7 @@ raop_handler_info(raop_conn_t *conn,
-     plist_t name_node = plist_new_string(name);
-     plist_dict_set_item(res_node, "name", name_node);
- 
-+    if (conn->raop->use_audio) {
-     plist_t audio_latencies_node = plist_new_array();
-     plist_t audio_latencies_0_node = plist_new_dict();
-     plist_t audio_latencies_0_output_latency_micros_node = plist_new_bool(0);
-@@ -111,6 +112,7 @@ raop_handler_info(raop_conn_t *conn,
-     plist_dict_set_item(audio_format_1_node, "audioInputFormats", audio_format_1_audio_input_formats_node);
-     plist_array_append_item(audio_formats_node, audio_format_1_node);
-     plist_dict_set_item(res_node, "audioFormats", audio_formats_node);
-+    }
- 
-     plist_t pi_node = plist_new_string(AIRPLAY_PI);
-     plist_dict_set_item(res_node, "pi", pi_node);
-@@ -194,6 +196,12 @@ raop_handler_pairpinstart(raop_conn_t *conn,
+@@ -194,6 +194,12 @@ raop_handler_pairpinstart(raop_conn_t *conn,
      if (conn->raop->callbacks.display_pin) {
           conn->raop->callbacks.display_pin(conn->raop->callbacks.cls, pin);
      }
@@ -248,7 +232,7 @@ index 4473901..ec52787 100644
      GstClockTime pts = (GstClockTime) *ntp_time; /*now in nsecs */
      //GstClockTimeDiff latency = GST_CLOCK_DIFF(gst_element_get_current_clock_time (renderer->appsrc), pts);
 diff --git a/uxplay.cpp b/uxplay.cpp
-index 3246ffd..1fb5962 100644
+index 3246ffd..18a9fb9 100644
 --- a/uxplay.cpp
 +++ b/uxplay.cpp
 @@ -171,6 +171,7 @@ static void log(int level, const char* format, ...) {
@@ -268,11 +252,10 @@ index 3246ffd..1fb5962 100644
              use_audio = false;
          } else if (arg == "-d") {
              debug_log = !debug_log;
-@@ -1326,20 +1327,22 @@ static int register_dnssd() {
-     int dnssd_error;
+@@ -1327,19 +1328,19 @@ static int register_dnssd() {
      uint64_t features;
      
--    if ((dnssd_error = dnssd_register_raop(dnssd, raop_port))) {
+     if ((dnssd_error = dnssd_register_raop(dnssd, raop_port))) {
 -        if (dnssd_error == -65537) {
 -             LOGE("No DNS-SD Server found (DNSServiceRegister call returned kDNSServiceErr_Unknown)");
 -        } else if (dnssd_error == -65548) {
@@ -284,8 +267,8 @@ index 3246ffd..1fb5962 100644
 -             LOGE("dnssd_register_raop failed with error code %d\n"
 -                  "mDNS Error codes are in range FFFE FF00 (-65792) to FFFE FFFF (-65537) "
 -                  "(see Apple's dns_sd.h)", dnssd_error);
-+    if (use_audio) {
-+        if ((dnssd_error = dnssd_register_raop(dnssd, raop_port))) {
+-        }
+-        return -3;
 +            if (dnssd_error == -65537) {
 +                 LOGE("No DNS-SD Server found (DNSServiceRegister call returned kDNSServiceErr_Unknown)");
 +            } else if (dnssd_error == -65548) {
@@ -299,55 +282,10 @@ index 3246ffd..1fb5962 100644
 +                      "(see Apple's dns_sd.h)", dnssd_error);
 +            }
 +            return -3;
-         }
--        return -3;
      }
      if ((dnssd_error = dnssd_register_airplay(dnssd, airplay_port))) {
          LOGE("dnssd_register_airplay failed with error code %d\n"
-@@ -1355,7 +1358,9 @@ static int register_dnssd() {
- 
- static void unregister_dnssd() {
-     if (dnssd) {
--        dnssd_unregister_raop(dnssd);
-+        if (use_audio) {
-+            dnssd_unregister_raop(dnssd);
-+        }
-         dnssd_unregister_airplay(dnssd);
-     }
-     return;
-@@ -1398,22 +1403,22 @@ static int start_dnssd(std::vector<char> hw_addr, std::string name) {
-     dnssd_set_airplay_features(dnssd,  7, 1); // mirroring supported
- 
-     dnssd_set_airplay_features(dnssd,  8, 0); // screen rotation  supported 
--    dnssd_set_airplay_features(dnssd,  9, 1); // audio supported 
--    dnssd_set_airplay_features(dnssd, 10, 1); //  
--    dnssd_set_airplay_features(dnssd, 11, 1); // audio packet redundancy supported
-+    dnssd_set_airplay_features(dnssd,  9, use_audio ? 1 : 0); // audio supported 
-+    dnssd_set_airplay_features(dnssd, 10, use_audio ? 1 : 0); //  
-+    dnssd_set_airplay_features(dnssd, 11, use_audio ? 1 : 0); // audio packet redundancy supported
- 
-     dnssd_set_airplay_features(dnssd, 12, 1); // FaiPlay secure auth supported 
-     dnssd_set_airplay_features(dnssd, 13, 1); // photo preloading  supported 
-     dnssd_set_airplay_features(dnssd, 14, 1); // Authentication bit 4:  FairPlay authentication
-     dnssd_set_airplay_features(dnssd, 15, 1); // Metadata bit 1 support:   Artwork 
- 
--    dnssd_set_airplay_features(dnssd, 16, 1); // Metadata bit 2 support:  Soundtrack  Progress 
--    dnssd_set_airplay_features(dnssd, 17, 1); // Metadata bit 0 support:  Text (DAACP) "Now Playing" info.
--    dnssd_set_airplay_features(dnssd, 18, 1); // Audio format 1 support:   
--    dnssd_set_airplay_features(dnssd, 19, 1); // Audio format 2 support: must be set for AirPlay 2 multiroom audio 
-+    dnssd_set_airplay_features(dnssd, 16, use_audio ? 1 : 0); // Metadata bit 2 support:  Soundtrack  Progress 
-+    dnssd_set_airplay_features(dnssd, 17, use_audio ? 1 : 0); // Metadata bit 0 support:  Text (DAACP) "Now Playing" info.
-+    dnssd_set_airplay_features(dnssd, 18, use_audio ? 1 : 0); // Audio format 1 support:   
-+    dnssd_set_airplay_features(dnssd, 19, use_audio ? 1 : 0); // Audio format 2 support: must be set for AirPlay 2 multiroom audio 
- 
--    dnssd_set_airplay_features(dnssd, 20, 1); // Audio format 3 support: must be set for AirPlay 2 multiroom audio 
--    dnssd_set_airplay_features(dnssd, 21, 1); // Audio format 4 support:
-+    dnssd_set_airplay_features(dnssd, 20, use_audio ? 1 : 0); // Audio format 3 support: must be set for AirPlay 2 multiroom audio 
-+    dnssd_set_airplay_features(dnssd, 21, use_audio ? 1 : 0); // Audio format 4 support:
-     dnssd_set_airplay_features(dnssd, 22, 1); // Authentication type 4: FairPlay authentication
-     dnssd_set_airplay_features(dnssd, 23, 0); // Authentication type 1: RSA Authentication
- 
-@@ -1524,6 +1529,14 @@ extern "C" void video_set_codec(void *cls, video_codec_t codec) {
+@@ -1524,6 +1525,14 @@ extern "C" void video_set_codec(void *cls, video_codec_t codec) {
  }
  
  extern "C" void display_pin(void *cls, char *pin) {
@@ -362,7 +300,7 @@ index 3246ffd..1fb5962 100644
      int margin = 10;
      int spacing = 3;
      char *image = create_pin_display(pin, margin, spacing);
-@@ -1550,12 +1563,13 @@ extern "C" void export_dacp(void *cls, const char *active_remote, const char *da
+@@ -1550,12 +1559,13 @@ extern "C" void export_dacp(void *cls, const char *active_remote, const char *da
  extern "C" void conn_init (void *cls) {
      open_connections++;
      LOGD("Open connections: %i", open_connections);
@@ -377,7 +315,7 @@ index 3246ffd..1fb5962 100644
      LOGD("Open connections: %i", open_connections);
      if (open_connections == 0) {
          remote_clock_offset = 0;
-@@ -1569,6 +1583,7 @@ extern "C" void conn_destroy (void *cls) {
+@@ -1569,6 +1579,7 @@ extern "C" void conn_destroy (void *cls) {
  }
  
  extern "C" void conn_reset (void *cls, int timeouts, bool reset_video) {
@@ -385,7 +323,7 @@ index 3246ffd..1fb5962 100644
      LOGI("***ERROR lost connection with client (network problem?)");
      if (timeouts) {
          LOGI("   Client no-response limit of %d timeouts (%d seconds) reached:", timeouts, 3*timeouts);
-@@ -1807,6 +1822,7 @@ extern "C" void audio_set_metadata(void *cls, const void *buffer, int buflen) {
+@@ -1807,6 +1818,7 @@ extern "C" void audio_set_metadata(void *cls, const void *buffer, int buflen) {
  }
  
  extern "C" void register_client(void *cls, const char *device_id, const char *client_pk, const char *client_name) {
@@ -393,7 +331,7 @@ index 3246ffd..1fb5962 100644
      if (!registration_list) {
        /* we are not maintaining a list of registered clients */
          return;
-@@ -1966,6 +1982,7 @@ static int start_raop_server (unsigned short display[5], unsigned short tcp[3],
+@@ -1966,6 +1978,7 @@ static int start_raop_server (unsigned short display[5], unsigned short tcp[3],
      if (audiodelay >= 0) raop_set_plist(raop, "audio_delay_micros", audiodelay);
      if (require_password) raop_set_plist(raop, "pin", (int) pin);
      if (hls_support) raop_set_plist(raop, "hls", 1);
@@ -401,7 +339,7 @@ index 3246ffd..1fb5962 100644
  
      /* network port selection (ports listed as "0" will be dynamically assigned) */
      raop_set_tcp_ports(raop, tcp);
-@@ -2105,6 +2122,8 @@ int main (int argc, char *argv[]) {
+@@ -2105,6 +2118,8 @@ int main (int argc, char *argv[]) {
      parse_arguments (argc, argv);
  
      log_level = (debug_log ? LOGGER_DEBUG : LOGGER_INFO);
@@ -410,7 +348,7 @@ index 3246ffd..1fb5962 100644
      
  #ifdef _WIN32    /*  use utf-8 terminal output; don't buffer stdout in WIN32 when debug_log = false */
      SetConsoleOutputCP(CP_UTF8);
-@@ -2189,11 +2208,12 @@ int main (int argc, char *argv[]) {
+@@ -2189,11 +2204,12 @@ int main (int argc, char *argv[]) {
          if (file.is_open()) {
              std::string line;
              while (std::getline(file, line)) {
