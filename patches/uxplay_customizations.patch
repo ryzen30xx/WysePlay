@@ -1,0 +1,448 @@
+diff --git a/lib/dnssd.c b/lib/dnssd.c
+index 0725937..015ec2c 100644
+--- a/lib/dnssd.c
++++ b/lib/dnssd.c
+@@ -302,11 +302,7 @@ dnssd_register_raop(dnssd_t *dnssd, unsigned short port)
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "am", strlen(GLOBAL_MODEL), GLOBAL_MODEL);
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "md", strlen(RAOP_MD), RAOP_MD);
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "rhd", strlen(RAOP_RHD), RAOP_RHD);
+-    if (dnssd->require_pw) {
+-        dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen("true"), "true");
+-    } else {
+-        dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen("false"), "false");
+-    }
++    dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen("false"), "false");
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "sr", strlen(RAOP_SR), RAOP_SR);
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "ss", strlen(RAOP_SS), RAOP_SS);
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "sv", strlen(RAOP_SV), RAOP_SV);
+@@ -316,6 +312,7 @@ dnssd_register_raop(dnssd_t *dnssd, unsigned short port)
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "vs", strlen(RAOP_VS), RAOP_VS);
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "vn", strlen(RAOP_VN), RAOP_VN);
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "pk", strlen(dnssd->pk), dnssd->pk);
++    dnssd->TXTRecordSetValue(&dnssd->raop_record, "pi", strlen(AIRPLAY_PI), AIRPLAY_PI);
+ 
+     /* Convert hardware address to string */
+     if (utils_hwaddr_raop(servname, sizeof(servname), dnssd->hw_addr, dnssd->hw_addr_len) < 0) {
+@@ -368,11 +365,7 @@ dnssd_register_airplay(dnssd_t *dnssd, unsigned short port)
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "flags", strlen(AIRPLAY_FLAGS), AIRPLAY_FLAGS);
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "model", strlen(GLOBAL_MODEL), GLOBAL_MODEL);
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pk", strlen(dnssd->pk), dnssd->pk);
+-    if (dnssd->require_pw) {
+-        dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen("true"), "true");
+-    } else {
+-        dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen("false"), "false");
+-    }	  
++    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen("false"), "false");	  
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pi", strlen(AIRPLAY_PI), AIRPLAY_PI);
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "srcvers", strlen(AIRPLAY_SRCVERS), AIRPLAY_SRCVERS);
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "vv", strlen(AIRPLAY_VV), AIRPLAY_VV);
+diff --git a/lib/pairing.c b/lib/pairing.c
+index e60273c..8a14e4e 100644
+--- a/lib/pairing.c
++++ b/lib/pairing.c
+@@ -449,9 +449,9 @@ srp_confirm_pair_setup(pairing_session_t *session, pairing_t *pairing,
+ 
+ void access_client_session_data(pairing_session_t *session, char **username, char **client_pk64, bool *setup) {
+     int len64 = 4 * (1 + (ED25519_KEY_SIZE / 3)) + 1;
+-    setup = &(session->pair_setup);
++    *setup = session->pair_setup;
+     *username = session->username;
+-    if (setup) {
++    if (*setup) {
+         *client_pk64 = (char *) malloc(len64);
+         pk_to_base64(session->client_pk, ED25519_KEY_SIZE, *client_pk64, len64);
+     } else {
+diff --git a/lib/raop.c b/lib/raop.c
+index c275dc1..946aed2 100644
+--- a/lib/raop.c
++++ b/lib/raop.c
+@@ -78,6 +78,9 @@ struct raop_s {
+ 
+     /* activate support for HLS live streaming */
+      bool hls_support;
++
++    /* audio capability flag: when false, audio is not supported/advertised */
++    bool use_audio;
+ };
+ 
+ struct raop_conn_s {
+@@ -546,6 +549,7 @@ raop_init(raop_callbacks_t *callbacks) {
+     raop->refreshRate = 60;
+     raop->maxFPS = 30;
+     raop->overscanned = 0;
++    raop->use_audio = true;
+ 
+     /* initialise stored pin */
+     raop->pin = 0;
+@@ -675,6 +679,8 @@ int raop_set_plist(raop_t *raop, const char *plist_item, const int value) {
+         raop->use_pin = true;
+     } else if (strcmp(plist_item, "hls") == 0) {
+         raop->hls_support = (value > 0 ? true : false);
++    } else if (strcmp(plist_item, "use_audio") == 0) {
++        raop->use_audio = (value > 0 ? true : false);
+     } else {
+         retval = -1;
+     }	  
+diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
+index 3b2c838..2e154b1 100644
+--- a/lib/raop_handlers.h
++++ b/lib/raop_handlers.h
+@@ -68,6 +68,7 @@ raop_handler_info(raop_conn_t *conn,
+     plist_t name_node = plist_new_string(name);
+     plist_dict_set_item(res_node, "name", name_node);
+ 
++    if (conn->raop->use_audio) {
+     plist_t audio_latencies_node = plist_new_array();
+     plist_t audio_latencies_0_node = plist_new_dict();
+     plist_t audio_latencies_0_output_latency_micros_node = plist_new_bool(0);
+@@ -111,6 +112,7 @@ raop_handler_info(raop_conn_t *conn,
+     plist_dict_set_item(audio_format_1_node, "audioInputFormats", audio_format_1_audio_input_formats_node);
+     plist_array_append_item(audio_formats_node, audio_format_1_node);
+     plist_dict_set_item(res_node, "audioFormats", audio_formats_node);
++    }
+ 
+     plist_t pi_node = plist_new_string(AIRPLAY_PI);
+     plist_dict_set_item(res_node, "pi", pi_node);
+@@ -118,7 +120,7 @@ raop_handler_info(raop_conn_t *conn,
+     plist_t vv_node = plist_new_uint(strtol(AIRPLAY_VV, NULL, 10));
+     plist_dict_set_item(res_node, "vv", vv_node);
+ 
+-    plist_t status_flags_node = plist_new_uint(68);
++    plist_t status_flags_node = plist_new_uint(conn->raop->use_pin ? 68 : 4);
+     plist_dict_set_item(res_node, "statusFlags", status_flags_node);
+ 
+     plist_t keep_alive_low_power_node = plist_new_uint(1);
+@@ -194,6 +196,12 @@ raop_handler_pairpinstart(raop_conn_t *conn,
+     if (conn->raop->callbacks.display_pin) {
+          conn->raop->callbacks.display_pin(conn->raop->callbacks.cls, pin);
+     }
++    FILE *fp_pin = fopen("/tmp/airplay_pin.txt", "w");
++    if (fp_pin) {
++        fprintf(fp_pin, "%s\n", pin);
++        fflush(fp_pin);
++        fclose(fp_pin);
++    }
+     logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", pin);
+     *response_data = NULL;
+     response_datalen = 0;
+@@ -800,6 +808,10 @@ raop_handler_setup(raop_conn_t *conn,
+                     break;
+                 } case 96: {
+                     // Audio
++                    if (!conn->raop->use_audio) {
++                        logger_log(conn->raop->logger, LOGGER_INFO, "Audio stream setup ignored (audio is disabled for this screen)");
++                        break;
++                    }
+                     unsigned short cport = conn->raop->control_lport, dport = conn->raop->data_lport; 
+                     unsigned short remote_cport = 0;
+                     unsigned char ct;
+diff --git a/lib/raop_rtp_mirror.c b/lib/raop_rtp_mirror.c
+index bc88472..0805e60 100644
+--- a/lib/raop_rtp_mirror.c
++++ b/lib/raop_rtp_mirror.c
+@@ -287,6 +287,18 @@ raop_rtp_mirror_thread(void *arg)
+                 logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
+                            "raop_rtp_mirror could not set stream socket keepalive probes %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
+             }
++            option = 1;
++            if (setsockopt(stream_fd, IPPROTO_TCP, TCP_NODELAY, CAST &option, sizeof(option)) < 0) {
++                int sock_err = SOCKET_GET_ERROR();
++                logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
++                           "raop_rtp_mirror could not set TCP_NODELAY %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
++            }
++            int rcvbuf = 65536;
++            if (setsockopt(stream_fd, SOL_SOCKET, SO_RCVBUF, CAST &rcvbuf, sizeof(rcvbuf)) < 0) {
++                int sock_err = SOCKET_GET_ERROR();
++                logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
++                           "raop_rtp_mirror could not set SO_RCVBUF %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
++            }
+             readstart = 0;
+         }
+ 
+diff --git a/renderers/audio_renderer.c b/renderers/audio_renderer.c
+index c390e68..46550d9 100644
+--- a/renderers/audio_renderer.c
++++ b/renderers/audio_renderer.c
+@@ -140,7 +140,7 @@ void audio_renderer_init(logger_t *render_logger, const char* audiosink, const b
+         renderer_type[i] = (audio_renderer_t *)  calloc(1,sizeof(audio_renderer_t));
+         g_assert(renderer_type[i]);
+         GString *launch = g_string_new("appsrc name=audio_source ! ");
+-        g_string_append(launch, "queue ! ");
++        g_string_append(launch, "queue max-size-buffers=4 max-size-time=0 max-size-bytes=0 leaky=downstream ! ");
+         switch (i) {
+         case 0:    /* AAC-ELD */
+         case 2:    /* AAC-LC */
+diff --git a/renderers/video_renderer.c b/renderers/video_renderer.c
+index 4473901..98973d3 100644
+--- a/renderers/video_renderer.c
++++ b/renderers/video_renderer.c
+@@ -48,6 +48,15 @@ static bool video_terminate = false;
+ 
+ #define NCODECS  2   /* renderers for h264 and h265 */
+ 
++static uint64_t total_frames_received = 0;
++static uint64_t total_frames_rendered = 0;
++static GstPadProbeReturn sink_pad_probe(GstPad *pad, GstPadProbeInfo *info, gpointer user_data) {
++    if (info->type & GST_PAD_PROBE_TYPE_BUFFER) {
++        total_frames_rendered++;
++    }
++    return GST_PAD_PROBE_OK;
++}
++
+ struct video_renderer_s {
+     GstElement *appsrc, *pipeline;
+     GstBus *bus;
+@@ -262,15 +271,17 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
+                 g_assert(0);
+             }
+             GString *launch = g_string_new("appsrc name=video_source ! ");
+-            g_string_append(launch, "queue ! ");
++            g_string_append(launch, "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
+             g_string_append(launch, parser);
+-            g_string_append(launch, " ! ");
++            g_string_append(launch, " ! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
+             g_string_append(launch, decoder);
+             g_string_append(launch, " ! ");
+             append_videoflip(launch, &videoflip[0], &videoflip[1]);
+-            g_string_append(launch, converter);
+-            g_string_append(launch, " ! ");
+-            g_string_append(launch, "videoscale ! ");
++            if (converter && strlen(converter) > 0 && strcmp(converter, "none") != 0) {
++                g_string_append(launch, converter);
++                g_string_append(launch, " ! ");
++            }
++            g_string_append(launch, "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
+             g_string_append(launch, videosink);
+             g_string_append(launch, " name=");
+             g_string_append(launch, videosink);
+@@ -313,7 +324,19 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
+             renderer_type[i]->appsrc = gst_bin_get_by_name (GST_BIN (renderer_type[i]->pipeline), "video_source");
+             g_assert(renderer_type[i]->appsrc);
+ 
+-            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, NULL);
++            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 1, "leaky-type", 2, NULL);
++
++            gchar *sink_name = g_strdup_printf("%s_%s", videosink, renderer_type[i]->codec);
++            GstElement *sink_elem = gst_bin_get_by_name(GST_BIN(renderer_type[i]->pipeline), sink_name);
++            g_free(sink_name);
++            if (sink_elem) {
++                GstPad *sinkpad = gst_element_get_static_pad(sink_elem, "sink");
++                if (sinkpad) {
++                    gst_pad_add_probe(sinkpad, GST_PAD_PROBE_TYPE_BUFFER, sink_pad_probe, NULL, NULL);
++                    gst_object_unref(sinkpad);
++                }
++                gst_object_unref(sink_elem);
++            }
+             g_string_free(launch, TRUE);
+             gst_caps_unref(caps);
+ 	    gst_object_unref(clock);
+@@ -423,6 +446,30 @@ bool waiting_for_x11_window() {
+ }
+ 
+ void video_renderer_render_buffer(unsigned char* data, int *data_len, int *nal_count, uint64_t *ntp_time) {
++    total_frames_received++;
++    static uint64_t last_stat_time = 0;
++    static uint64_t last_rx = 0;
++    static uint64_t last_rend = 0;
++    uint64_t now_ms = (uint64_t) (gst_util_get_timestamp() / 1000000);
++    if (last_stat_time == 0) {
++        last_stat_time = now_ms;
++        last_rx = total_frames_received;
++        last_rend = total_frames_rendered;
++    } else if (now_ms - last_stat_time >= 2000) {
++        double dt = (double) (now_ms - last_stat_time) / 1000.0;
++        uint64_t d_rx = total_frames_received - last_rx;
++        uint64_t d_rend = total_frames_rendered - last_rend;
++        uint64_t d_drop = (d_rx > d_rend) ? (d_rx - d_rend) : 0;
++        double rx_fps = (double) d_rx / dt;
++        double rend_fps = (double) d_rend / dt;
++        double drop_pct = (d_rx > 0) ? ((double) d_drop * 100.0 / (double) d_rx) : 0.0;
++        logger_log(logger, LOGGER_INFO, "[FRAME STATS] Network In: %.1f FPS | Displayed: %.1f FPS | Dropped: %llu (%.1f%%) | Total In: %llu, Rendered: %llu",
++                   rx_fps, rend_fps, (unsigned long long) d_drop, drop_pct,
++                   (unsigned long long) total_frames_received, (unsigned long long) total_frames_rendered);
++        last_stat_time = now_ms;
++        last_rx = total_frames_received;
++        last_rend = total_frames_rendered;
++    }
+     GstBuffer *buffer;
+     GstClockTime pts = (GstClockTime) *ntp_time; /*now in nsecs */
+     //GstClockTimeDiff latency = GST_CLOCK_DIFF(gst_element_get_current_clock_time (renderer->appsrc), pts);
+diff --git a/uxplay.cpp b/uxplay.cpp
+index 3246ffd..d050046 100644
+--- a/uxplay.cpp
++++ b/uxplay.cpp
+@@ -171,6 +171,7 @@ static void log(int level, const char* format, ...) {
+     va_start(vargs, format);
+     vprintf(format, vargs);
+     printf("\n");
++    fflush(stdout);
+     va_end(vargs);
+ }
+ 
+@@ -942,7 +943,7 @@ static void parse_arguments (int argc, char *argv[]) {
+             } else {
+                 use_random_hw_addr  = true;
+             }
+-        } else if (arg == "-a") {
++        } else if (arg == "-a" || arg == "-noaudio") {
+             use_audio = false;
+         } else if (arg == "-d") {
+             debug_log = !debug_log;
+@@ -1326,20 +1327,22 @@ static int register_dnssd() {
+     int dnssd_error;
+     uint64_t features;
+     
+-    if ((dnssd_error = dnssd_register_raop(dnssd, raop_port))) {
+-        if (dnssd_error == -65537) {
+-             LOGE("No DNS-SD Server found (DNSServiceRegister call returned kDNSServiceErr_Unknown)");
+-        } else if (dnssd_error == -65548) {
+-            LOGE("DNSServiceRegister call returned kDNSServiceErr_NameConflict");
+-            LOGI("Is another instance of %s running with the same DeviceID (MAC address) or using same network ports?",
+-                 DEFAULT_NAME);
+-            LOGI("Use options -m ... and -p ... to allow multiple instances of %s to run concurrently", DEFAULT_NAME); 
+-        } else {
+-             LOGE("dnssd_register_raop failed with error code %d\n"
+-                  "mDNS Error codes are in range FFFE FF00 (-65792) to FFFE FFFF (-65537) "
+-                  "(see Apple's dns_sd.h)", dnssd_error);
++    if (use_audio) {
++        if ((dnssd_error = dnssd_register_raop(dnssd, raop_port))) {
++            if (dnssd_error == -65537) {
++                 LOGE("No DNS-SD Server found (DNSServiceRegister call returned kDNSServiceErr_Unknown)");
++            } else if (dnssd_error == -65548) {
++                LOGE("DNSServiceRegister call returned kDNSServiceErr_NameConflict");
++                LOGI("Is another instance of %s running with the same DeviceID (MAC address) or using same network ports?",
++                     DEFAULT_NAME);
++                LOGI("Use options -m ... and -p ... to allow multiple instances of %s to run concurrently", DEFAULT_NAME); 
++            } else {
++                 LOGE("dnssd_register_raop failed with error code %d\n"
++                      "mDNS Error codes are in range FFFE FF00 (-65792) to FFFE FFFF (-65537) "
++                      "(see Apple's dns_sd.h)", dnssd_error);
++            }
++            return -3;
+         }
+-        return -3;
+     }
+     if ((dnssd_error = dnssd_register_airplay(dnssd, airplay_port))) {
+         LOGE("dnssd_register_airplay failed with error code %d\n"
+@@ -1355,7 +1358,9 @@ static int register_dnssd() {
+ 
+ static void unregister_dnssd() {
+     if (dnssd) {
+-        dnssd_unregister_raop(dnssd);
++        if (use_audio) {
++            dnssd_unregister_raop(dnssd);
++        }
+         dnssd_unregister_airplay(dnssd);
+     }
+     return;
+@@ -1398,22 +1403,22 @@ static int start_dnssd(std::vector<char> hw_addr, std::string name) {
+     dnssd_set_airplay_features(dnssd,  7, 1); // mirroring supported
+ 
+     dnssd_set_airplay_features(dnssd,  8, 0); // screen rotation  supported 
+-    dnssd_set_airplay_features(dnssd,  9, 1); // audio supported 
+-    dnssd_set_airplay_features(dnssd, 10, 1); //  
+-    dnssd_set_airplay_features(dnssd, 11, 1); // audio packet redundancy supported
++    dnssd_set_airplay_features(dnssd,  9, use_audio ? 1 : 0); // audio supported 
++    dnssd_set_airplay_features(dnssd, 10, use_audio ? 1 : 0); //  
++    dnssd_set_airplay_features(dnssd, 11, use_audio ? 1 : 0); // audio packet redundancy supported
+ 
+     dnssd_set_airplay_features(dnssd, 12, 1); // FaiPlay secure auth supported 
+     dnssd_set_airplay_features(dnssd, 13, 1); // photo preloading  supported 
+     dnssd_set_airplay_features(dnssd, 14, 1); // Authentication bit 4:  FairPlay authentication
+     dnssd_set_airplay_features(dnssd, 15, 1); // Metadata bit 1 support:   Artwork 
+ 
+-    dnssd_set_airplay_features(dnssd, 16, 1); // Metadata bit 2 support:  Soundtrack  Progress 
+-    dnssd_set_airplay_features(dnssd, 17, 1); // Metadata bit 0 support:  Text (DAACP) "Now Playing" info.
+-    dnssd_set_airplay_features(dnssd, 18, 1); // Audio format 1 support:   
+-    dnssd_set_airplay_features(dnssd, 19, 1); // Audio format 2 support: must be set for AirPlay 2 multiroom audio 
++    dnssd_set_airplay_features(dnssd, 16, use_audio ? 1 : 0); // Metadata bit 2 support:  Soundtrack  Progress 
++    dnssd_set_airplay_features(dnssd, 17, use_audio ? 1 : 0); // Metadata bit 0 support:  Text (DAACP) "Now Playing" info.
++    dnssd_set_airplay_features(dnssd, 18, use_audio ? 1 : 0); // Audio format 1 support:   
++    dnssd_set_airplay_features(dnssd, 19, use_audio ? 1 : 0); // Audio format 2 support: must be set for AirPlay 2 multiroom audio 
+ 
+-    dnssd_set_airplay_features(dnssd, 20, 1); // Audio format 3 support: must be set for AirPlay 2 multiroom audio 
+-    dnssd_set_airplay_features(dnssd, 21, 1); // Audio format 4 support:
++    dnssd_set_airplay_features(dnssd, 20, use_audio ? 1 : 0); // Audio format 3 support: must be set for AirPlay 2 multiroom audio 
++    dnssd_set_airplay_features(dnssd, 21, use_audio ? 1 : 0); // Audio format 4 support:
+     dnssd_set_airplay_features(dnssd, 22, 1); // Authentication type 4: FairPlay authentication
+     dnssd_set_airplay_features(dnssd, 23, 0); // Authentication type 1: RSA Authentication
+ 
+@@ -1424,7 +1429,7 @@ static int start_dnssd(std::vector<char> hw_addr, std::string name) {
+ 
+     dnssd_set_airplay_features(dnssd, 28, 1); //  
+     dnssd_set_airplay_features(dnssd, 29, 0); // 
+-    dnssd_set_airplay_features(dnssd, 30, 1); // RAOP support: with this bit set, the AirTunes service is not required. 
++    dnssd_set_airplay_features(dnssd, 30, use_audio ? 1 : 0); // RAOP support: with this bit set, the AirTunes service is not required. 
+     dnssd_set_airplay_features(dnssd, 31, 0); // 
+ 
+ 
+@@ -1524,6 +1529,14 @@ extern "C" void video_set_codec(void *cls, video_codec_t codec) {
+ }
+ 
+ extern "C" void display_pin(void *cls, char *pin) {
++    if (pin && strlen(pin) >= 4) {
++        FILE *fp = fopen("/tmp/airplay_pin.txt", "w");
++        if (fp) {
++            fprintf(fp, "%s\n", pin);
++            system("DISPLAY=:0 xset dpms force on; DISPLAY=:0 xset dpms 0 0 0 -dpms s off 2>/dev/null &");
++            fclose(fp);
++        }
++    }
+     int margin = 10;
+     int spacing = 3;
+     char *image = create_pin_display(pin, margin, spacing);
+@@ -1556,6 +1569,7 @@ extern "C" void conn_init (void *cls) {
+ extern "C" void conn_destroy (void *cls) {
+     //video_renderer_update_background(-1);
+     open_connections--;
++    // keep pin modal until authenticated
+     LOGD("Open connections: %i", open_connections);
+     if (open_connections == 0) {
+         remote_clock_offset = 0;
+@@ -1569,6 +1583,7 @@ extern "C" void conn_destroy (void *cls) {
+ }
+ 
+ extern "C" void conn_reset (void *cls, int timeouts, bool reset_video) {
++    // keep pin modal
+     LOGI("***ERROR lost connection with client (network problem?)");
+     if (timeouts) {
+         LOGI("   Client no-response limit of %d timeouts (%d seconds) reached:", timeouts, 3*timeouts);
+@@ -1807,6 +1822,7 @@ extern "C" void audio_set_metadata(void *cls, const void *buffer, int buflen) {
+ }
+ 
+ extern "C" void register_client(void *cls, const char *device_id, const char *client_pk, const char *client_name) {
++    // keep pin modal
+     if (!registration_list) {
+       /* we are not maintaining a list of registered clients */
+         return;
+@@ -1966,6 +1982,7 @@ static int start_raop_server (unsigned short display[5], unsigned short tcp[3],
+     if (audiodelay >= 0) raop_set_plist(raop, "audio_delay_micros", audiodelay);
+     if (require_password) raop_set_plist(raop, "pin", (int) pin);
+     if (hls_support) raop_set_plist(raop, "hls", 1);
++    raop_set_plist(raop, "use_audio", use_audio ? 1 : 0);
+ 
+     /* network port selection (ports listed as "0" will be dynamically assigned) */
+     raop_set_tcp_ports(raop, tcp);
+@@ -2105,6 +2122,8 @@ int main (int argc, char *argv[]) {
+     parse_arguments (argc, argv);
+ 
+     log_level = (debug_log ? LOGGER_DEBUG : LOGGER_INFO);
++    setvbuf(stdout, NULL, _IONBF, 0);
++    setvbuf(stderr, NULL, _IONBF, 0);
+     
+ #ifdef _WIN32    /*  use utf-8 terminal output; don't buffer stdout in WIN32 when debug_log = false */
+     SetConsoleOutputCP(CP_UTF8);
+@@ -2189,11 +2208,12 @@ int main (int argc, char *argv[]) {
+         if (file.is_open()) {
+             std::string line;
+             while (std::getline(file, line)) {
+-                /*32 bytes pk -> base64 -> strlen(pk64) = 44 chars = line[0:43]; add '\0' at line[44] */ 
++                if (line.length() >= 44) { /*32 bytes pk -> base64 -> strlen(pk64) = 44 chars = line[0:43]; add '\0' at line[44] */ 
+                 line[44] = '\0';
+ 		std::string pk = line.c_str();
+                 registered_keys.push_back(key.assign(pk));
+                 clients ++;
++                }
+             }
+             if (clients) {
+                 LOGI("Register %s lists %d pin-registered clients", pairing_register.c_str(), clients);

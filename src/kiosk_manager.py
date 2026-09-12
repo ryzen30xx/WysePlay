@@ -282,14 +282,16 @@ def hotplug_and_network_watcher():
                         time.sleep(0.5)
 
                         res, rate, name = make_wallpaper.get_display_info()
-                        new_info = (name, res, rate)
+                        has_audio, _ = check_hdmi_audio_support()
+                        new_info = (name, res, rate, has_audio)
 
                         if CURRENT_DISPLAY is not None and new_info != CURRENT_DISPLAY:
                             time.sleep(1.0)
                             subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
                             time.sleep(0.5)
                             res2, rate2, name2 = make_wallpaper.get_display_info()
-                            stable_info = (name2, res2, rate2)
+                            has_audio2, _ = check_hdmi_audio_support()
+                            stable_info = (name2, res2, rate2, has_audio2)
 
                             if stable_info != CURRENT_DISPLAY and stable_info[0] not in ("None", "Unknown"):
                                 restart_uxplay_for_display(stable_info)
@@ -342,6 +344,59 @@ def is_allwinner_h313_h616(profile=None):
         pass
     return False
 
+def check_hdmi_audio_support() -> tuple[bool, str]:
+    """
+    Checks if the connected HDMI display supports audio playback.
+    Inspects ALSA ELD (/proc/asound/card*/eld*) and DRM EDID CEA-861 blocks.
+    Returns (has_audio: bool, reason: str).
+    """
+    # 1. Primary check: ALSA ELD (EDID-Like Data created by ALSA SoC HDMI codec)
+    eld_files = glob.glob("/proc/asound/card*/eld*")
+    for eld_path in eld_files:
+        try:
+            with open(eld_path, "r", errors="ignore") as f:
+                content = f.read()
+            if "connection_type" in content and "HDMI" in content:
+                m = re.search(r"sad_count\s+(\d+)", content)
+                if m:
+                    sad_count = int(m.group(1))
+                    if sad_count > 0:
+                        return True, f"ALSA ELD sad_count={sad_count}"
+                    else:
+                        return False, f"ALSA ELD sad_count=0 (không có Short Audio Descriptors)"
+        except Exception:
+            pass
+
+    # 2. Secondary check: Direct DRM HDMI EDID CEA-861 block
+    drm_edids = glob.glob("/sys/class/drm/card*-HDMI*/edid")
+    for edid_path in drm_edids:
+        try:
+            with open(edid_path, "rb") as f:
+                edid = f.read()
+            if len(edid) >= 256:
+                ext_blocks = edid[126]
+                for i in range(1, ext_blocks + 1):
+                    block = edid[i * 128 : (i + 1) * 128]
+                    if len(block) == 128 and block[0] == 0x02:  # CEA-861
+                        # Bit 6 of byte 3 is Basic Audio Support
+                        basic_audio = bool(block[3] & 0x40)
+                        if basic_audio:
+                            return True, "DRM EDID CEA-861 bit Basic Audio bật"
+                        dtd_start = block[2]
+                        offset = 4
+                        while offset < dtd_start and offset < 128:
+                            header = block[offset]
+                            tag = (header >> 5) & 0x07
+                            length = header & 0x1F
+                            if tag == 1 and length > 0:  # Audio Data Block
+                                return True, "DRM EDID CEA-861 tìm thấy Audio Data Block"
+                            offset += 1 + length
+                return False, "DRM EDID CEA-861 không có khối Audio Data"
+        except Exception:
+            pass
+
+    return False, "Không phát hiện phần cứng âm thanh HDMI"
+
 def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
     os.environ['DISPLAY'] = ':0'
@@ -372,7 +427,8 @@ def main():
         wifi_gui_showing=(CURRENT_NET_TYPE == "NONE"),
         wait_sync=False
     )
-    CURRENT_DISPLAY = (monitor_name, res, rate)
+    has_audio_init, _ = check_hdmi_audio_support()
+    CURRENT_DISPLAY = (monitor_name, res, rate, has_audio_init)
     subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
 
     # Start background watcher threads
@@ -397,7 +453,8 @@ def main():
 
         # 1. Detect display and generate wallpaper
         monitor_name, res, rate = make_wallpaper.generate_wallpaper(wait_sync=False)
-        CURRENT_DISPLAY = (monitor_name, res, rate)
+        has_audio, audio_reason = check_hdmi_audio_support()
+        CURRENT_DISPLAY = (monitor_name, res, rate, has_audio)
 
         # Apply wallpaper
         subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
@@ -472,6 +529,13 @@ def main():
             '-pin',
             '-reg', '/opt/airplay/registered_clients.txt'
         ])
+
+        # Check if connected HDMI display has audio capability
+        if not has_audio:
+            print(f"[Kiosk] HDMI Audio Check: Thiết bị '{monitor_name}' KHÔNG có loa/âm thanh ({audio_reason}). Tự động tắt quảng bá Audio (-a) để Mac giữ nguyên âm thanh máy tính!")
+            extra_flags.append('-a')
+        else:
+            print(f"[Kiosk] HDMI Audio Check: Thiết bị '{monitor_name}' CÓ hỗ trợ âm thanh HDMI ({audio_reason}). Bật tính năng Audio AirPlay.")
 
         cmd = [
             'stdbuf', '-oL', '-eL',
