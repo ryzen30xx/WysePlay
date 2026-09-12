@@ -507,14 +507,11 @@ def main():
         is_h313_h616 = is_allwinner_h313_h616(profile)
         if is_h313_h616:
             # Tailored strictly for Allwinner H313/H616 (Quad Cortex-A53 + XR819 2.4GHz Wi-Fi):
-            # Testing 1080p (1920x1080@30) per user request:
-            # - Hardware VPU decoder (v4l2slh264dec) with direct DMABUF zero-copy rendering
-            # - Clamped TCP buffer (64KB) + 1-buffer leaky queues prevent all multi-second lag accumulation
-            # - Use -vsync no for zero-latency interactive mirroring
-            target_res = "1920x1080"
+            # 1280x720@30 achieves solid 30 FPS hardware VPU decoding without frame drops or macroblock corruption
+            target_res = "1280x720"
             stream_fps = 30
             decoder = "v4l2slh264dec"
-            print(f"[Kiosk] Profile Allwinner H313/H616 phát hiện: Áp dụng cấu hình 1080p (1920x1080@30fps HW VPU v4l2slh264dec, zero-copy DMABUF, vsync no)")
+            print(f"[Kiosk] Profile Allwinner H313/H616 phát hiện: Áp dụng cấu hình 720p (1280x720@30fps HW VPU v4l2slh264dec, zero-copy DMABUF, vsync no)")
         else:
             # Generic / higher-end hardware: keep benchmarked framerate and configurations
             stream_fps = int(target_fps)

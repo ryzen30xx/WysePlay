@@ -84,7 +84,7 @@ index c275dc1..946aed2 100644
          retval = -1;
      }	  
 diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
-index 3b2c838..2e154b1 100644
+index 3b2c838..2280b80 100644
 --- a/lib/raop_handlers.h
 +++ b/lib/raop_handlers.h
 @@ -68,6 +68,7 @@ raop_handler_info(raop_conn_t *conn,
@@ -125,17 +125,6 @@ index 3b2c838..2e154b1 100644
      logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", pin);
      *response_data = NULL;
      response_datalen = 0;
-@@ -800,6 +808,10 @@ raop_handler_setup(raop_conn_t *conn,
-                     break;
-                 } case 96: {
-                     // Audio
-+                    if (!conn->raop->use_audio) {
-+                        logger_log(conn->raop->logger, LOGGER_INFO, "Audio stream setup ignored (audio is disabled for this screen)");
-+                        break;
-+                    }
-                     unsigned short cport = conn->raop->control_lport, dport = conn->raop->data_lport; 
-                     unsigned short remote_cport = 0;
-                     unsigned char ct;
 diff --git a/lib/raop_rtp_mirror.c b/lib/raop_rtp_mirror.c
 index bc88472..0805e60 100644
 --- a/lib/raop_rtp_mirror.c
@@ -173,7 +162,7 @@ index c390e68..46550d9 100644
          case 0:    /* AAC-ELD */
          case 2:    /* AAC-LC */
 diff --git a/renderers/video_renderer.c b/renderers/video_renderer.c
-index 4473901..98973d3 100644
+index 4473901..ec52787 100644
 --- a/renderers/video_renderer.c
 +++ b/renderers/video_renderer.c
 @@ -48,6 +48,15 @@ static bool video_terminate = false;
@@ -197,10 +186,10 @@ index 4473901..98973d3 100644
              }
              GString *launch = g_string_new("appsrc name=video_source ! ");
 -            g_string_append(launch, "queue ! ");
-+            g_string_append(launch, "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
++            g_string_append(launch, "queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, parser);
 -            g_string_append(launch, " ! ");
-+            g_string_append(launch, " ! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
++            g_string_append(launch, " ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, decoder);
              g_string_append(launch, " ! ");
              append_videoflip(launch, &videoflip[0], &videoflip[1]);
@@ -220,7 +209,7 @@ index 4473901..98973d3 100644
              g_assert(renderer_type[i]->appsrc);
  
 -            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, NULL);
-+            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 1, "leaky-type", 2, NULL);
++            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 2, NULL);
 +
 +            gchar *sink_name = g_strdup_printf("%s_%s", videosink, renderer_type[i]->codec);
 +            GstElement *sink_elem = gst_bin_get_by_name(GST_BIN(renderer_type[i]->pipeline), sink_name);
