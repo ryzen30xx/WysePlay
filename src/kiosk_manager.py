@@ -422,12 +422,14 @@ def main():
         if "xvimagesink" in video_sink and "qos=false" not in video_sink:
             video_sink = video_sink.replace("xvimagesink", "xvimagesink qos=false")
 
-        # Zero-latency live mirroring mode, low audio buffer, persistent client whitelist & PIN prompt
+        # Zero-latency live mirroring mode, persistent client whitelist & PIN prompt
         extra_flags.extend([
-            '-al', '0.05',
             '-pin',
             '-reg', '/opt/airplay/registered_clients.txt'
         ])
+
+        # Enforce 30 FPS max streaming to fit within 2.4GHz Wi-Fi bandwidth without buffer bloat
+        stream_fps = min(int(target_fps), 30)
 
         cmd = [
             'stdbuf', '-oL', '-eL',
@@ -437,8 +439,8 @@ def main():
             '-nohold',
             '-fs',
             '-p',
-            '-s', f'{target_res}@60',
-            '-fps', str(target_fps),
+            '-s', f'{target_res}@{stream_fps}',
+            '-fps', str(stream_fps),
             '-reset', '3',
             '-nofreeze',
             '-vsync', 'no',
