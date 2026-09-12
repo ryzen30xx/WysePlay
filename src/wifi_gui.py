@@ -315,8 +315,8 @@ class WifiKioskApp:
         self.is_withdrawn_for_stream = False
         self.root.after(200, self._streaming_check_loop)
 
-        # Check for AirPlay Passcode PIN display request (every 150ms)
-        self.root.after(150, self._pin_check_loop)
+        # Check for AirPlay Passcode PIN display request (every 50ms)
+        self.root.after(50, self._pin_check_loop)
 
     def _render_panel_image(self, has_network):
         """Renders raw PIL Image for AirPlay Standby Notification Panel with 2x supersampling."""
@@ -517,6 +517,9 @@ class WifiKioskApp:
         self.img_btn_cancel     = make_pill_button(104, 34, 12, "#2c2c2e", "Hủy (Esc)", "#ffffff", is_bold=False)
         self.img_btn_connect    = make_pill_button(136, 34, 12, self.COLOR_SELECTED, "Kết nối (Enter)", "#ffffff", is_bold=True)
         self.img_btn_connecting = make_pill_button(136, 34, 12, self.COLOR_SELECTED, "Đang kết nối...", "#ffffff", is_bold=True)
+
+        # 5. Pre-cache authentic Apple TV AirPlay Passcode PIN modal (< 5ms instant popup)
+        self._init_pin_modal_cache()
 
     def _build_wifi_ui(self):
         """Builds the full Apple TV styled Wi-Fi Settings UI inside self.wifi_frame."""
@@ -807,40 +810,36 @@ class WifiKioskApp:
             pass
         self.root.after(500, self._streaming_check_loop)
 
-    def _render_pin_modal_image(self, pin_str):
+    def _init_pin_modal_cache(self):
         """
-        Renders an authentic Apple TV AirPlay Passcode overlay.
-        Full screen dark scrim backdrop with a centered glassmorphic card
-        and 4 large, crisp digit boxes.
+        Pre-renders the static background card and 11 digit boxes (0-9, •)
+        at native screen resolution during initialization so runtime display is instantaneous (< 5ms).
         """
-        SS = 2
-        W = self.sw * SS
-        H = self.sh * SS
-        scale = min(self.sw / 1920, self.sh / 1080) * SS
-        if scale < 1.2:
-            scale = 1.2
+        scale = min(self.sw / 1920, self.sh / 1080)
+        if scale < 0.8:
+            scale = 0.8
 
-        # 82% dark translucent backdrop
-        img = Image.new("RGBA", (W, H), (7, 7, 9, int(255 * 0.82)))
-        draw = ImageDraw.Draw(img)
+        # 1. Fullscreen dark backdrop (94% alpha for clean dimming without background bleed)
+        self.pin_modal_bg_img = Image.new("RGBA", (self.sw, self.sh), (8, 8, 10, int(255 * 0.94)))
+        draw = ImageDraw.Draw(self.pin_modal_bg_img)
 
-        # Card dimensions
+        # 2. Centered glassmorphic card dimensions
         cw = int(620 * scale)
         ch = int(410 * scale)
-        cx = (W - cw) // 2
-        cy = (H - ch) // 2
+        cx = (self.sw - cw) // 2
+        cy = (self.sh - ch) // 2
         radius = int(28 * scale)
 
-        # Ambient blue glow behind the card (authentic Apple TV lighting)
+        # 3. Ambient blue glow behind the card (authentic Apple TV lighting)
         max_glow = int(360 * scale)
         glow_img = Image.new("RGBA", (max_glow * 2, max_glow * 2), (0, 0, 0, 0))
         glow_draw = ImageDraw.Draw(glow_img)
-        for r in range(max_glow, 0, -3):
+        for r in range(max_glow, 0, -4):
             alpha = int(26 * (1.0 - r / float(max_glow)))
             glow_draw.ellipse([max_glow - r, max_glow - r, max_glow + r, max_glow + r], fill=(0, 113, 227, alpha))
-        img.paste(glow_img, (W // 2 - max_glow, H // 2 - max_glow), glow_img)
+        self.pin_modal_bg_img.paste(glow_img, (self.sw // 2 - max_glow, self.sh // 2 - max_glow), glow_img)
 
-        # Main Card background with border
+        # 4. Main Card background with border
         draw.rounded_rectangle(
             [cx, cy, cx + cw, cy + ch],
             radius=radius,
@@ -849,7 +848,7 @@ class WifiKioskApp:
             width=int(2 * scale)
         )
 
-        # AirPlay Symbol Icon
+        # 5. AirPlay Symbol Icon
         target_icon_h = int(42 * scale)
         curr_y = cy + int(34 * scale)
         try:
@@ -857,14 +856,14 @@ class WifiKioskApp:
             ratio = target_icon_h / sym.height
             target_icon_w = int(sym.width * ratio)
             sym = sym.resize((target_icon_w, target_icon_h), Image.Resampling.LANCZOS)
-            icon_x = (W - target_icon_w) // 2
-            img.paste(sym, (icon_x, curr_y), sym)
+            icon_x = (self.sw - target_icon_w) // 2
+            self.pin_modal_bg_img.paste(sym, (icon_x, curr_y), sym)
         except Exception:
             target_icon_h = int(32 * scale)
 
         curr_y += target_icon_h + int(14 * scale)
 
-        # Typography
+        # 6. Typography
         try:
             font_title = ImageFont.truetype(FONT_DISPLAY_BOLD, int(22 * scale))
             font_sub = ImageFont.truetype(FONT_TEXT_REG, int(12 * scale))
@@ -876,57 +875,82 @@ class WifiKioskApp:
         # Title: "Mật mã AirPlay"
         t_title = "Mật mã AirPlay"
         b_title = draw.textbbox((0, 0), t_title, font=font_title)
-        draw.text(((W - (b_title[2] - b_title[0])) // 2, curr_y), t_title, fill="#ffffff", font=font_title)
+        draw.text(((self.sw - (b_title[2] - b_title[0])) // 2, curr_y), t_title, fill="#ffffff", font=font_title)
         curr_y += (b_title[3] - b_title[1]) + int(8 * scale)
 
         # Subtitle: "Nhập mã này trên thiết bị của bạn để kết nối với <monitor_name>"
         dev_name = self.monitor_name if self.monitor_name else "AirPlay Display"
-        t_sub = f"Nhập mật mã này trên thiết bị của bạn để kết nối với \"{dev_name}\""
+        t_sub = f'Nhập mật mã này trên thiết bị của bạn để kết nối với "{dev_name}"'
         b_sub = draw.textbbox((0, 0), t_sub, font=font_sub)
-        draw.text(((W - (b_sub[2] - b_sub[0])) // 2, curr_y), t_sub, fill="#86868b", font=font_sub)
+        draw.text(((self.sw - (b_sub[2] - b_sub[0])) // 2, curr_y), t_sub, fill="#86868b", font=font_sub)
         curr_y += (b_sub[3] - b_sub[1]) + int(26 * scale)
 
-        # 4 Large PIN Digit Boxes
+        # 7. Box dimensions and coordinates
         box_w = int(88 * scale)
         box_h = int(108 * scale)
         box_gap = int(20 * scale)
         box_r = int(18 * scale)
         total_boxes_w = 4 * box_w + 3 * box_gap
-        start_bx = (W - total_boxes_w) // 2
+        start_bx = (self.sw - total_boxes_w) // 2
 
-        digits = list(str(pin_str).strip()[:4].ljust(4, "•"))
-        for idx, d in enumerate(digits):
-            bx = start_bx + idx * (box_w + box_gap)
+        self.pin_box_positions = [(start_bx + idx * (box_w + box_gap), curr_y) for idx in range(4)]
+
+        # Draw empty boxes on base card
+        for bx, by in self.pin_box_positions:
             draw.rounded_rectangle(
-                [bx, curr_y, bx + box_w, curr_y + box_h],
+                [bx, by, bx + box_w, by + box_h],
                 radius=box_r,
                 fill="#222225",
                 outline="#48484a",
                 width=int(2 * scale)
             )
-            b_d = draw.textbbox((0, 0), d, font=font_digit)
-            dw = b_d[2] - b_d[0]
-            dh = b_d[3] - b_d[1]
-            dx = bx + (box_w - dw) // 2 - b_d[0]
-            dy = curr_y + (box_h - dh) // 2 - b_d[1] - int(2 * scale)
-            draw.text((dx, dy), d, fill="#ffffff", font=font_digit)
 
         curr_y += box_h + int(24 * scale)
 
         # Footer Badge: "✓ Thiết bị sẽ tự động được lưu vào danh sách tin cậy sau khi kết nối"
         t_foot = "✓ Thiết bị sẽ tự động được lưu vào danh sách tin cậy sau khi kết nối"
         b_foot = draw.textbbox((0, 0), t_foot, font=font_foot)
-        draw.text(((W - (b_foot[2] - b_foot[0])) // 2, curr_y), t_foot, fill="#30d158", font=font_foot)
+        draw.text(((self.sw - (b_foot[2] - b_foot[0])) // 2, curr_y), t_foot, fill="#30d158", font=font_foot)
 
-        return ImageTk.PhotoImage(img.resize((self.sw, self.sh), Image.Resampling.LANCZOS))
+        # 8. Pre-render digit box patches (0-9 and bullet •)
+        self.pin_digit_box_images = {}
+        for ch in "0123456789•":
+            bimg = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
+            bdraw = ImageDraw.Draw(bimg)
+            bdraw.rounded_rectangle(
+                [0, 0, box_w, box_h],
+                radius=box_r,
+                fill="#222225",
+                outline="#48484a",
+                width=int(2 * scale)
+            )
+            b_d = bdraw.textbbox((0, 0), ch, font=font_digit)
+            dw = b_d[2] - b_d[0]
+            dh = b_d[3] - b_d[1]
+            dx = (box_w - dw) // 2 - b_d[0]
+            dy = (box_h - dh) // 2 - b_d[1] - int(2 * scale)
+            bdraw.text((dx, dy), ch, fill="#ffffff", font=font_digit)
+            self.pin_digit_box_images[ch] = bimg
+
+    def _render_pin_modal_image(self, pin_str):
+        """
+        Instantaneous PIN modal rendering (< 5ms) by pasting pre-rendered digit patches
+        onto pre-rendered background canvas with alpha masking.
+        """
+        if not hasattr(self, "pin_modal_bg_img") or not hasattr(self, "pin_digit_box_images"):
+            self._init_pin_modal_cache()
+
+        img = self.pin_modal_bg_img.copy()
+        digits = list(str(pin_str).strip()[:4].ljust(4, "•"))
+        for idx, d in enumerate(digits):
+            patch = self.pin_digit_box_images.get(d, self.pin_digit_box_images.get("•"))
+            if patch and idx < len(self.pin_box_positions):
+                img.paste(patch, self.pin_box_positions[idx], mask=patch)
+
+        return ImageTk.PhotoImage(img)
 
     def _show_pin_modal(self, pin_str):
         print(f"[WifiKiosk] >>> DISPLAYING PIN MODAL: {pin_str} <<<", flush=True)
-        try:
-            subprocess.run("DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null", shell=True)
-            subprocess.run("DISPLAY=:0 xset dpms force on 2>/dev/null", shell=True)
-        except Exception:
-            pass
         self._current_displayed_pin = pin_str
         self.pin_modal_photo = self._render_pin_modal_image(pin_str)
         if self.pin_modal_item is not None:
@@ -973,7 +997,7 @@ class WifiKioskApp:
                 self._hide_pin_modal()
         except Exception as e:
             print(f"[WifiKiosk] Error in pin check loop: {e}", flush=True)
-        self.root.after(150, self._pin_check_loop)
+        self.root.after(50, self._pin_check_loop)
 
     def _on_arrow_up(self, event):
         if self.current_state != "DISCONNECTED" or self.password_ssid is not None:

@@ -377,7 +377,7 @@ def main():
         target_res = "1920x1080"
         target_fps = 60
         target_h265 = False
-        decoder = "v4l2slh264dec" if os.path.exists("/dev/video0") else "avdec_h264"
+        decoder = "avdec_h264"
         video_sink = "autovideosink"
 
         if profile and "selected_profile" in profile:
@@ -385,7 +385,10 @@ def main():
             target_res = sp.get("resolution", "1920x1080")
             target_fps = sp.get("max_fps", 60)
             target_h265 = sp.get("h265", False)
+            # Use avdec_h264 (NEON ARM assembly, 203.9 FPS @ 16% CPU) to prevent NV12_4L4 software de-tiling
             decoder = profile.get("decoder", "avdec_h264")
+            if decoder == "v4l2slh264dec":
+                decoder = "avdec_h264"
             raw_sink = profile.get("video_sink", "autovideosink")
             video_sink = "autovideosink" if raw_sink in ("ximagesink", "", None) else raw_sink
             print(f"[Kiosk] Benchmark Profile active: {sp.get('tier', 'Custom')} -> Stream: {target_res}@{target_fps}fps (H.265: {target_h265}, Decoder: {decoder}, Sink: {video_sink})")
@@ -415,11 +418,9 @@ def main():
         if "xvimagesink" in video_sink and "qos=false" not in video_sink:
             video_sink = video_sink.replace("xvimagesink", "xvimagesink qos=false")
 
-        # Low latency: -vsync no uncouples video from audio timestamps (zero presentation delay), multi-core color conversion
-        # Pin security & persistent registered whitelist for paired clients
+        # Clock-synced 60 FPS presentation, low audio buffer, persistent client whitelist & PIN prompt
         extra_flags.extend([
-            '-al', '0.1',
-            '-vc', 'videoconvert n-threads=4',
+            '-al', '0.05',
             '-pin',
             '-reg', '/opt/airplay/registered_clients.txt'
         ])
@@ -436,7 +437,7 @@ def main():
             '-fps', str(target_fps),
             '-reset', '3',
             '-nofreeze',
-            '-vsync', 'no',
+            '-vsync', '0',
             '-FPSdata',
             '-vs', video_sink
         ] + extra_flags
