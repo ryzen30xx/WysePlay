@@ -84,7 +84,7 @@ index c275dc1..946aed2 100644
          retval = -1;
      }	  
 diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
-index 3b2c838..2280b80 100644
+index 3b2c838..5fbb02f 100644
 --- a/lib/raop_handlers.h
 +++ b/lib/raop_handlers.h
 @@ -68,6 +68,7 @@ raop_handler_info(raop_conn_t *conn,
@@ -103,15 +103,6 @@ index 3b2c838..2280b80 100644
  
      plist_t pi_node = plist_new_string(AIRPLAY_PI);
      plist_dict_set_item(res_node, "pi", pi_node);
-@@ -118,7 +120,7 @@ raop_handler_info(raop_conn_t *conn,
-     plist_t vv_node = plist_new_uint(strtol(AIRPLAY_VV, NULL, 10));
-     plist_dict_set_item(res_node, "vv", vv_node);
- 
--    plist_t status_flags_node = plist_new_uint(68);
-+    plist_t status_flags_node = plist_new_uint(conn->raop->use_pin ? 68 : 4);
-     plist_dict_set_item(res_node, "statusFlags", status_flags_node);
- 
-     plist_t keep_alive_low_power_node = plist_new_uint(1);
 @@ -194,6 +196,12 @@ raop_handler_pairpinstart(raop_conn_t *conn,
      if (conn->raop->callbacks.display_pin) {
           conn->raop->callbacks.display_pin(conn->raop->callbacks.cls, pin);
@@ -257,7 +248,7 @@ index 4473901..ec52787 100644
      GstClockTime pts = (GstClockTime) *ntp_time; /*now in nsecs */
      //GstClockTimeDiff latency = GST_CLOCK_DIFF(gst_element_get_current_clock_time (renderer->appsrc), pts);
 diff --git a/uxplay.cpp b/uxplay.cpp
-index 3246ffd..e162bc1 100644
+index 3246ffd..1fb5962 100644
 --- a/uxplay.cpp
 +++ b/uxplay.cpp
 @@ -171,6 +171,7 @@ static void log(int level, const char* format, ...) {
@@ -371,7 +362,14 @@ index 3246ffd..e162bc1 100644
      int margin = 10;
      int spacing = 3;
      char *image = create_pin_display(pin, margin, spacing);
-@@ -1556,6 +1569,7 @@ extern "C" void conn_init (void *cls) {
+@@ -1550,12 +1563,13 @@ extern "C" void export_dacp(void *cls, const char *active_remote, const char *da
+ extern "C" void conn_init (void *cls) {
+     open_connections++;
+     LOGD("Open connections: %i", open_connections);
+-    //video_renderer_update_background(1);
++    system("DISPLAY=:0 xset dpms force on; DISPLAY=:0 xset -dpms s off 2>/dev/null &");
+ }
+ 
  extern "C" void conn_destroy (void *cls) {
      //video_renderer_update_background(-1);
      open_connections--;

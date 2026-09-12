@@ -20,6 +20,68 @@ CURRENT_NET_TYPE = None
 CURRENT_WIFI_GUI_ACTIVE = None
 STATE_LOCK = threading.Lock()
 
+LAST_ACTIVITY = time.time()
+MONITOR_ASLEEP = False
+SLEEP_TIMEOUT = 30.0  # Seconds of standby idle before turning off display panel & backlight
+
+def wake_display(reason="Activity"):
+    global LAST_ACTIVITY, MONITOR_ASLEEP
+    LAST_ACTIVITY = time.time()
+    if MONITOR_ASLEEP:
+        MONITOR_ASLEEP = False
+        subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
+        print(f"[Kiosk] Display WOKEN UP ({reason}): Monitor panel & backlight ON.")
+
+def sleep_display():
+    global MONITOR_ASLEEP
+    with STATE_LOCK:
+        if MONITOR_ASLEEP:
+            return
+        if CURRENT_LOCKED:
+            return
+        if os.path.exists("/tmp/airplay_pin.txt"):
+            return
+        MONITOR_ASLEEP = True
+        subprocess.run('DISPLAY=:0 xset +dpms 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset dpms force off 2>/dev/null', shell=True)
+        print("[Kiosk] Idle 30s: Display entered DPMS SLEEP (monitor panel & backlight OFF).")
+
+def display_power_manager():
+    """
+    Monitors system inactivity, mouse movement, and streaming state.
+    Turns OFF monitor panel & backlight after 30s of inactivity in standby.
+    Wakes monitor immediately upon network connection or mouse interaction.
+    """
+    global LAST_ACTIVITY, MONITOR_ASLEEP
+    last_mouse_pos = None
+    while True:
+        time.sleep(1.0)
+        # 1. Detect physical user interaction via mouse movement
+        try:
+            out = subprocess.check_output("DISPLAY=:0 xdotool getmouselocation 2>/dev/null || true", shell=True).decode()
+            if "x:" in out and "y:" in out:
+                parts = out.split()
+                pos = (parts[0], parts[1])
+                if last_mouse_pos is not None and pos != last_mouse_pos:
+                    wake_display(reason="Mouse movement")
+                last_mouse_pos = pos
+        except Exception:
+            pass
+
+        # 2. If streaming or displaying PIN OTP, keep active and cancel sleep
+        if CURRENT_LOCKED or os.path.exists("/tmp/airplay_pin.txt"):
+            LAST_ACTIVITY = time.time()
+            if MONITOR_ASLEEP:
+                wake_display(reason="AirPlay streaming or PIN modal active")
+            continue
+
+        # 3. Check 30s idle timeout
+        if not MONITOR_ASLEEP:
+            idle_time = time.time() - LAST_ACTIVITY
+            if idle_time >= SLEEP_TIMEOUT:
+                sleep_display()
+
 def set_inputs(locked: bool):
     global CURRENT_LOCKED
     if CURRENT_LOCKED == locked:
@@ -41,6 +103,7 @@ def on_stream_started():
         if CURRENT_LOCKED:
             return
         CURRENT_LOCKED = True
+        wake_display(reason="AirPlay stream started")
         try:
             open("/tmp/airplay_streaming", "w").close()
         except Exception:
@@ -67,12 +130,13 @@ def on_stream_ended():
         subprocess.run('DISPLAY=:0 xsetroot -cursor_name left_ptr 2>/dev/null', shell=True)
         subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
         subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
-        print("[Kiosk] AirPlay stream ended: Restored standby wallpaper (screen active).")
+        wake_display(reason="AirPlay stream ended, standby restored")
+        print("[Kiosk] AirPlay stream ended: Restored standby wallpaper (30s sleep timer started).")
 
 def monitor_uxplay_output(proc):
     """
     Reads UxPlay stdout line-by-line in real time.
-    Detects stream start and end events with 0ms delay, 0% CPU, and 0 X11 lock contention.
+    Detects stream start, PIN prompts, and end events with 0ms delay.
     """
     try:
         with open("/tmp/uxplay.log", "a") as ux_log:
@@ -81,18 +145,24 @@ def monitor_uxplay_output(proc):
                     break
                 ux_log.write(line)
                 ux_log.flush()
-                # Track AirPlay PIN authentication requests and display on screen
-                if "PAIR-PIN-START" in line or "connection request from" in line:
-                    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null; DISPLAY=:0 xset dpms 0 0 0 -dpms s off s 0 0 2>/dev/null', shell=True)
 
+                # 1. Wake display instantly upon any incoming client connection request
+                if (
+                    "Accepted IPv" in line
+                    or "connection request from" in line
+                    or "PAIR-PIN-START" in line
+                ):
+                    wake_display(reason="Incoming AirPlay connection")
+
+                # 2. Track AirPlay PIN authentication requests and display OTP modal
                 m = re.search(r'CLIENT MUST NOW ENTER PIN = "(\d{4})"', line)
                 if m:
                     pin_code = m.group(1)
-                    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null; DISPLAY=:0 xset dpms 0 0 0 -dpms s off s 0 0 2>/dev/null', shell=True)
+                    wake_display(reason=f"PIN OTP required: {pin_code}")
                     try:
                         with open("/tmp/airplay_pin.txt", "w") as pf:
                             pf.write(pin_code + "\n")
-                        print(f"[Kiosk] PIN Passcode generated: {pin_code}. Displaying on screen.")
+                        print(f"[Kiosk] PIN Passcode generated: {pin_code}. Displaying OTP modal on screen.")
                     except Exception:
                         pass
                 elif "registered new client" in line:
@@ -102,6 +172,7 @@ def monitor_uxplay_output(proc):
                     except Exception:
                         pass
 
+                # 3. Stream lifecycle
                 if "Initialized GStreamer video renderer" in line or "identified as Connection type RAOP" in line:
                     try:
                         if os.path.exists("/tmp/airplay_pin.txt"):
@@ -116,13 +187,15 @@ def monitor_uxplay_output(proc):
                     or "video has finished" in line
                     or "video_reset" in line
                 ):
+                    try:
+                        if os.path.exists("/tmp/airplay_pin.txt"):
+                            os.remove("/tmp/airplay_pin.txt")
+                    except Exception:
+                        pass
                     if CURRENT_LOCKED:
-                        try:
-                            if os.path.exists("/tmp/airplay_pin.txt"):
-                                os.remove("/tmp/airplay_pin.txt")
-                        except Exception:
-                            pass
                         on_stream_ended()
+                    # Terminate UxPlay cleanly so it restarts fresh for the next session
+                    stop_uxplay(reason="Client disconnected / stream finished")
     except Exception as e:
         print("[Kiosk] UxPlay monitor error:", e)
 
@@ -426,9 +499,10 @@ def main():
     except OSError:
         pass
 
-    # Clear root screen and disable DPMS monitor sleep (screen stays on 24/7)
+    # Clear root screen and initialize DPMS (enabled, display active at boot)
     subprocess.run('DISPLAY=:0 xsetroot -solid "#000000"', shell=True)
-    subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
+    subprocess.run('DISPLAY=:0 xset +dpms 2>/dev/null', shell=True)
+    subprocess.run('DISPLAY=:0 xset s off s noblank 2>/dev/null', shell=True)
     subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
     
     # Ensure inputs are unlocked in standby
@@ -454,6 +528,7 @@ def main():
     # Start background watcher threads
     window_watcher()
     hotplug_and_network_watcher()
+    threading.Thread(target=display_power_manager, daemon=True, name="DisplayPowerManager").start()
 
     # Launch or close Wi-Fi GUI based on verified initial network state
     manage_wifi_gui()
@@ -559,7 +634,6 @@ def main():
             'uxplay',
             '-nh',
             '-n', monitor_name,
-            '-nohold',
             '-fs',
             '-p',
             '-s', f'{target_res}@{stream_fps}',

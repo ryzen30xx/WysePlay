@@ -6,9 +6,8 @@ if [ -f "$HOME/.Xresources" ]; then
     xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
 fi
 
-# Disable all screen blanking & DPMS sleep so standby wallpaper is always visible
-xset dpms 0 0 0 2>/dev/null || true
-xset -dpms 2>/dev/null || true
+# Enable DPMS power management so monitor can sleep
+xset +dpms 2>/dev/null || true
 xset s off 2>/dev/null || true
 xset s 0 0 2>/dev/null || true
 xset s noblank 2>/dev/null || true
