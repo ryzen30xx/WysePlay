@@ -388,8 +388,8 @@ def main():
         if "xvimagesink" in video_sink and "qos=false" not in video_sink:
             video_sink = video_sink.replace("xvimagesink", "xvimagesink qos=false")
 
-        # Low latency: -as 0 disables audio sync delay (2-3s AirPlay buffer), multi-core color conversion
-        extra_flags.extend(['-as', '0', '-al', '0.1', '-vc', 'videoconvert n-threads=4'])
+        # Low latency: -vsync no uncouples video from audio timestamps (zero presentation delay), multi-core color conversion
+        extra_flags.extend(['-al', '0.1', '-vc', 'videoconvert n-threads=4'])
 
         cmd = [
             'stdbuf', '-oL', '-eL',
