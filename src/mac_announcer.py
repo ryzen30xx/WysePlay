@@ -6,8 +6,8 @@ Bridges TV Box AirPlay announcement into macOS mDNSResponder with proper Apple T
 
 import sys, os, time, subprocess, signal
 
-TVBOX_IPS = ["192.168.2.20", "192.168.2.97"]
-TVBOX_HOSTNAME = "x96q.local."
+TVBOX_IPS = ["192.168.2.133", "192.168.2.97", "192.168.2.20"]
+TVBOX_HOSTNAME = "x96q-lan.local."
 AIRPLAY_NAME = "P27FBA-RAGL"
 RAOP_NAME = f"1200D5218EC0@{AIRPLAY_NAME}"
 
@@ -54,29 +54,39 @@ def main():
         TVBOX_HOSTNAME, target_ip
     ] + RAOP_TXT
 
-    p_airplay = subprocess.Popen(cmd_airplay)
-    p_raop = subprocess.Popen(cmd_raop)
+    while True:
+        p_airplay = subprocess.Popen(cmd_airplay)
+        p_raop = subprocess.Popen(cmd_raop)
 
-    def cleanup(sig, frame):
-        print("\n[Mac Announcer] Stopping proxy registrations...")
-        p_airplay.terminate()
-        p_raop.terminate()
-        sys.exit(0)
+        def cleanup(sig, frame):
+            print("\n[Mac Announcer] Stopping proxy registrations...")
+            try:
+                p_airplay.terminate()
+                p_raop.terminate()
+            except Exception:
+                pass
+            sys.exit(0)
 
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
+        signal.signal(signal.SIGINT, cleanup)
+        signal.signal(signal.SIGTERM, cleanup)
 
-    print(f"[Mac Announcer] Active! '{AIRPLAY_NAME}' is now registered with Screen Mirroring capabilities.")
-    sys.stdout.flush()
+        print(f"[Mac Announcer] Active! '{AIRPLAY_NAME}' is now registered with Screen Mirroring capabilities.")
+        sys.stdout.flush()
 
-    try:
-        while True:
-            time.sleep(1)
-            if p_airplay.poll() is not None or p_raop.poll() is not None:
-                print("[Mac Announcer] Process exited, restarting...")
-                break
-    except KeyboardInterrupt:
-        cleanup(None, None)
+        try:
+            while True:
+                time.sleep(2)
+                if p_airplay.poll() is not None or p_raop.poll() is not None:
+                    print("[Mac Announcer] Process exited, respawning...")
+                    try:
+                        p_airplay.terminate()
+                        p_raop.terminate()
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                    break
+        except KeyboardInterrupt:
+            cleanup(None, None)
 
 if __name__ == "__main__":
     main()
