@@ -5,8 +5,8 @@ WysePlay is a dedicated AirPlay Screen Mirroring receiver platform. Under NO cir
 
 ### Mandatory DNS-SD / Bonjour Parameters:
 1. **AirPlay Service (`_airplay._tcp`)**:
-   - `features`: MUST be `0x5A7FFEE6,0x0`. Bit 7 (Screen Mirroring) and Bit 27 (AirPlay 2 / Legacy Screen Pairing) MUST be `1`. Never change to `0x527FFEE6`.
-   - `flags`: MUST be `0x4`. NEVER use `0x204` or set bit 9 (`0x200`), which causes macOS `APBonjourCacheManager` to reject the device with `Ignoring device found without pairing ID`.
+   - `features`: MUST be `0x527FFEE6,0x0`. Bit 7 (Screen Mirroring) is ON, while Bit 27 MUST be `0` (disabling legacy/HomeKit pairing ID requirement so Apple clients never reject with "Ignoring device found without pairing ID").
+   - `flags`: MUST be `0x204`. Bit 9 (`0x200`) MUST be set (`0x200 | 0x4 = 0x204`) to explicitly declare the target as an Apple Screen Mirroring destination.
    - `model`: `AppleTV3,2`
    - `srcvers`: `220.68`
    - `vv`: `2`
@@ -14,8 +14,8 @@ WysePlay is a dedicated AirPlay Screen Mirroring receiver platform. Under NO cir
 
 2. **RAOP Audio Service (`_raop._tcp`)**:
    - Name: `<MAC_ADDRESS_UPPERCASE_NO_COLONS>@<NAME>` (e.g., `1200D5218EC0@P27FBA-RAGL`).
-   - `sf`: MUST be `0x4`. NEVER use `0x204`.
-   - `ft`: `0x5A7FFEE6,0x0`.
+   - `sf`: MUST be `0x204`. Bit 9 (`0x200`) MUST be set for Screen Mirroring.
+   - `ft`: `0x527FFEE6,0x0`.
    - `am`: `AppleTV3,2`.
    - `tp`: `UDP`.
 
