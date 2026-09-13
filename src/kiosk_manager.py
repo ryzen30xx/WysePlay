@@ -814,9 +814,9 @@ def main():
             target_h265 = True
             print(f"[Kiosk] Chế độ 4K Ultra HD: Stream 3840x2160@60fps (H.265)")
         else:
-            # Automatic based on benchmark profile
-            stream_fps = int(target_fps) if target_fps else 60
-            print(f"[Kiosk] Cấu hình tự động theo Benchmark Profile: Stream {target_res}@{stream_fps}fps")
+            # Always request full 60 FPS from AirPlay source, never cap in software
+            stream_fps = 60
+            print(f"[Kiosk] Cấu hình tự động: Stream {target_res}@{stream_fps}fps (Mở tối đa 60 FPS, không khóa FPS bằng code)")
 
         # 4. Select the optimal decoder for target architecture
         soc_platform = (profile.get("soc_platform") if profile else "") or ""

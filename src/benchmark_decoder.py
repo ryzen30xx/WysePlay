@@ -1194,10 +1194,10 @@ def benchmark_hardware():
             "resolution": "3840x2160",
             "width": 3840,
             "height": 2160,
-            "max_fps": 30,
+            "max_fps": 60,
             "h265": True,
-            "tier": f"4K Ultra HD @ 30 FPS",
-            "reason": f"Phần cứng giải mã 4K ở mức 30 FPS ổn định ({p4k['fps']} FPS) qua {p4k['decoder']}."
+            "tier": f"4K Ultra HD @ 60 FPS",
+            "reason": f"Phần cứng giải mã 4K ổn định ({p4k['fps']} FPS) qua {p4k['decoder']}."
         }
         chosen_decoder = p4k["decoder"]
     elif p1080["passed_30"]:
@@ -1205,10 +1205,10 @@ def benchmark_hardware():
             "resolution": "1920x1080",
             "width": 1920,
             "height": 1080,
-            "max_fps": 30,
+            "max_fps": 60,
             "h265": False,
-            "tier": f"Full HD @ 30 FPS",
-            "reason": f"Phần cứng không duy trì được 60 FPS. Chọn 1080p @ 30 FPS ({p1080['fps']} FPS qua {p1080['decoder']}) để bảo đảm độ sắc nét."
+            "tier": f"Full HD @ 60 FPS",
+            "reason": f"Chọn 1080p @ 60 FPS ({p1080['fps']} FPS qua {p1080['decoder']}) mở tối đa băng thông, không khóa FPS bằng code."
         }
         chosen_decoder = p1080["decoder"]
     elif p720["passed_30"]:
@@ -1216,10 +1216,10 @@ def benchmark_hardware():
             "resolution": "1280x720",
             "width": 1280,
             "height": 720,
-            "max_fps": 30,
+            "max_fps": 60,
             "h265": False,
-            "tier": f"HD Ready @ 30 FPS",
-            "reason": f"Cấu hình 720p @ 30 FPS ({p720['fps']} FPS) giúp thiết bị hoạt động mát mẻ, không drop frame."
+            "tier": f"HD Ready @ 60 FPS",
+            "reason": f"Cấu hình 720p @ 60 FPS ({p720['fps']} FPS qua {p720['decoder']}) tối ưu độ mượt của chuột, không khóa FPS."
         }
         chosen_decoder = p720["decoder"]
     else:
@@ -1227,10 +1227,10 @@ def benchmark_hardware():
             "resolution": "960x540",
             "width": 960,
             "height": 540,
-            "max_fps": 30,
+            "max_fps": 60,
             "h265": False,
-            "tier": "SD 540p @ 30 FPS",
-            "reason": "Phần cứng siêu nhẹ, giảm tải tối đa để tránh quá nhiệt."
+            "tier": "SD 540p @ 60 FPS",
+            "reason": "Mở tối đa băng thông 60 FPS, không khóa FPS."
         }
         chosen_decoder = p720.get("decoder", "avdec_h264")
 
