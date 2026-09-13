@@ -185,7 +185,6 @@ def monitor_uxplay_output(proc):
                     or "exiting TCP thread" in line
                     or "running is no longer true" in line
                     or "video has finished" in line
-                    or "video_reset" in line
                 ):
                     try:
                         if os.path.exists("/tmp/airplay_pin.txt"):
@@ -194,8 +193,8 @@ def monitor_uxplay_output(proc):
                         pass
                     if CURRENT_LOCKED:
                         on_stream_ended()
-                    # Terminate UxPlay cleanly so it restarts fresh for the next session
-                    stop_uxplay(reason="Client disconnected / stream finished")
+                    # Keep UxPlay running as a permanent daemon across sessions:
+                    # Do not kill UxPlay on disconnect, preventing mDNS flapping and device disappearance on client devices.
     except Exception as e:
         print("[Kiosk] UxPlay monitor error:", e)
 
@@ -676,11 +675,12 @@ def main():
             'uxplay',
             '-nh',
             '-n', monitor_name,
+            '-nohold',
             '-fs',
             '-p',
             '-s', f'{target_res}@{stream_fps}',
             '-fps', str(stream_fps),
-            '-reset', '3',
+            '-reset', '0',
             '-nofreeze',
             '-vsync', 'no',
             '-FPSdata',
