@@ -348,6 +348,15 @@ build_and_install_custom_uxplay() {
 
         if curl -fsSL --connect-timeout 8 --max-time 60 "$release_url" -o "$temp_bin" 2>/dev/null; then
             chmod +x "$temp_bin"
+            # Tự động liên kết tương thích thư viện libplist nếu OS mới hơn (Debian 13 Trixie / Ubuntu 24.04+)
+            if [[ ! -f /usr/lib/aarch64-linux-gnu/libplist-2.0.so.3 && ! -f /usr/lib/x86_64-linux-gnu/libplist-2.0.so.3 && ! -f /usr/lib/libplist-2.0.so.3 ]]; then
+                local plist_found
+                plist_found=$(find /usr/lib /lib -name "libplist-2.0.so.*" 2>/dev/null | head -n 1)
+                if [[ -n "$plist_found" ]]; then
+                    ln -sf "$plist_found" "$(dirname "$plist_found")/libplist-2.0.so.3" 2>/dev/null || true
+                fi
+            fi
+
             if "$temp_bin" -h 2>&1 | grep -q "noaudio"; then
                 systemctl stop airplay-kiosk.service 2>/dev/null || true
                 cp -f "$temp_bin" /usr/local/bin/uxplay
