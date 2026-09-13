@@ -41,8 +41,11 @@ log_error()   { echo -e "${C_RED}✖  ${1}${C_RESET}" >&2; }
 AUTO_START=true
 SPECIFIED_USER=""
 SPECIFIED_MODE=""
+REBUILD_UXPLAY=false
+NO_PREBUILT=false
 REPO_URL="https://github.com/ryzen30xx/WysePlay.git"
 RAW_BASE_URL="https://raw.githubusercontent.com/ryzen30xx/WysePlay/main"
+RELEASE_BASE_URL="https://github.com/ryzen30xx/WysePlay/releases/latest/download"
 TEMP_DIR=""
 
 show_help() {
@@ -57,6 +60,8 @@ Options:
   --user <username>                   Specify target Linux user (default: current sudo user or UID 1000)
   --mode <720p|1080p|smooth|sharp>    Select display mode (720p=smooth 60fps [upscaled], 1080p=sharp native 1:1)
   --no-start                          Do not start the airplay-kiosk service immediately after installation
+  --rebuild-uxplay                    Force re-compiling custom UxPlay from source on this device
+  --no-prebuilt                       Do not download pre-built binary, compile from source
   -h, --help                          Show this help message
 HELP_EOF
     exit 0
@@ -74,6 +79,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-start)
             AUTO_START=false
+            shift
+            ;;
+        --rebuild-uxplay|--force-build|--rebuild)
+            REBUILD_UXPLAY=true
+            shift
+            ;;
+        --no-prebuilt|--compile)
+            NO_PREBUILT=true
             shift
             ;;
         -h|--help)
@@ -290,14 +303,73 @@ XWRAP_EOF
 # ==============================================================================
 
 build_and_install_custom_uxplay() {
-    log_step "Biên dịch và cài đặt UxPlay tối ưu hoá (Auto-Audio & Zero-Latency) cho mọi CPU..."
+    log_step "Cài đặt UxPlay tối ưu hoá (Auto-Audio, Apple PIN & Zero-Latency)..."
 
-    # Check if UxPlay already has our customizations (-noaudio flag)
-    if command -v uxplay >/dev/null 2>&1 && uxplay -h 2>&1 | grep -q "noaudio"; then
-        log_success "Hệ thống đã có sẵn bản UxPlay tối ưu hoá. Bỏ qua bước biên dịch."
-        return 0
+    local patch_file="${SOURCE_DIR}/patches/uxplay_customizations.patch"
+    local current_patch_hash=""
+    if [[ -f "$patch_file" ]]; then
+        current_patch_hash=$(sha256sum "$patch_file" 2>/dev/null | awk '{print $1}' || md5sum "$patch_file" 2>/dev/null | awk '{print $1}' || true)
     fi
 
+    local installed_patch_hash=""
+    if [[ -f /opt/airplay/.uxplay_patch_hash ]]; then
+        installed_patch_hash=$(cat /opt/airplay/.uxplay_patch_hash 2>/dev/null || true)
+    fi
+
+    # 1. Kiểm tra nếu bản UxPlay hiện tại đã là bản mới nhất và khớp patch hash
+    if [[ "$REBUILD_UXPLAY" != true ]] && command -v uxplay >/dev/null 2>&1 && uxplay -h 2>&1 | grep -q "noaudio"; then
+        if [[ -n "$current_patch_hash" && "$current_patch_hash" == "$installed_patch_hash" ]]; then
+            log_success "UxPlay đã ở phiên bản tối ưu mới nhất (Patch: ${current_patch_hash:0:8}). Bỏ qua bước cài đặt."
+            return 0
+        elif [[ -z "$current_patch_hash" ]]; then
+            log_success "Hệ thống đã có sẵn bản UxPlay tối ưu hoá. Bỏ qua bước cài đặt."
+            return 0
+        fi
+    fi
+
+    local arch
+    arch=$(uname -m)
+    local binary_arch=""
+    case "$arch" in
+        x86_64|amd64)
+            binary_arch="x86_64"
+            ;;
+        aarch64|arm64)
+            binary_arch="arm64"
+            ;;
+    esac
+
+    # 2. Thử tải Pre-built Binary từ GitHub Release (tải nhanh 2 giây, không tốn RAM/CPU compile)
+    if [[ "$NO_PREBUILT" != true && "$REBUILD_UXPLAY" != true && -n "$binary_arch" ]]; then
+        local release_url="${RELEASE_BASE_URL}/uxplay-linux-${binary_arch}"
+        log_info "Thử tải binary UxPlay pre-built (${binary_arch}) từ GitHub Release..."
+        local temp_bin
+        temp_bin=$(mktemp /tmp/uxplay_prebuilt_XXXXXX)
+
+        if curl -fsSL --connect-timeout 8 --max-time 60 "$release_url" -o "$temp_bin" 2>/dev/null; then
+            chmod +x "$temp_bin"
+            if "$temp_bin" -h 2>&1 | grep -q "noaudio"; then
+                systemctl stop airplay-kiosk.service 2>/dev/null || true
+                cp -f "$temp_bin" /usr/local/bin/uxplay
+                chmod 755 /usr/local/bin/uxplay
+                mkdir -p /opt/airplay
+                if [[ -n "$current_patch_hash" ]]; then
+                    echo "$current_patch_hash" > /opt/airplay/.uxplay_patch_hash
+                fi
+                rm -f "$temp_bin"
+                log_success "Đã cài đặt UxPlay pre-built (${binary_arch}) thành công (không tốn tài nguyên compile)!"
+                return 0
+            else
+                log_warn "Binary pre-built tải về không tương thích glibc/thư viện của hệ điều hành này."
+            fi
+            rm -f "$temp_bin"
+        else
+            log_info "Chưa tìm thấy release pre-built cho ${binary_arch} hoặc không thể tải từ GitHub."
+        fi
+    fi
+
+    # 3. Fallback: Tự động biên dịch từ mã nguồn trên thiết bị
+    log_info "Chuyển sang cơ chế tự biên dịch (compile) UxPlay từ mã nguồn..."
     log_info "Cài đặt các gói công cụ biên dịch mã nguồn..."
     BUILD_DEPS=(
         cmake
@@ -309,6 +381,7 @@ build_and_install_custom_uxplay() {
         libavahi-compat-libdnssd-dev
         libgstreamer1.0-dev
         libgstreamer-plugins-base1.0-dev
+        libx11-dev
     )
     apt-get install -y --no-install-recommends "${BUILD_DEPS[@]}"
 
@@ -323,11 +396,18 @@ build_and_install_custom_uxplay() {
             git apply "${SOURCE_DIR}/patches/uxplay_customizations.patch"
         fi
         mkdir -p build && cd build
-        cmake ..
+        cmake .. -DCMAKE_BUILD_TYPE=Release
         make -j$(nproc 2>/dev/null || echo 2)
+        systemctl stop airplay-kiosk.service 2>/dev/null || true
         make install
     )
     rm -rf "${UXPLAY_BUILD_DIR}"
+
+    mkdir -p /opt/airplay
+    if [[ -n "$current_patch_hash" ]]; then
+        echo "$current_patch_hash" > /opt/airplay/.uxplay_patch_hash
+    fi
+
     log_success "Đã biên dịch và cài đặt thành công UxPlay tối ưu hoá vào /usr/local/bin/uxplay!"
 }
 

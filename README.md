@@ -55,11 +55,19 @@ curl -fsSL https://raw.githubusercontent.com/ryzen30xx/WysePlay/main/install.sh 
 ```
 
 > [!TIP]
-> Script cài đặt tích hợp sẵn bộ **Pre-flight Checks** tự động kiểm tra hệ điều hành, kiến trúc CPU, dung lượng ổ đĩa, quyền hạn root và tự động nhận diện người dùng hệ thống để cấu hình.
+> **Tốc độ cài đặt cực nhanh qua GitHub Actions CI/CD**:
+> Script sẽ tự động nhận diện kiến trúc CPU (`aarch64` hoặc `x86_64`) và tải trực tiếp bản binary `uxplay` đã được GitHub Actions biên dịch sẵn từ GitHub Releases (chỉ mất ~2 giây, không cần cài `cmake`, `gcc` hay tốn RAM/CPU của thiết bị). Nếu mạng ngoại tuyến hoặc chạy kiến trúc khác, script tự động chuyển sang cơ chế biên dịch tại chỗ (fallback).
 
-Nếu muốn chỉ định một tài khoản người dùng cụ thể để chạy giao diện Kiosk:
+Các tùy chọn cài đặt nâng cao:
 ```bash
+# Chỉ định tài khoản người dùng chạy Kiosk
 curl -fsSL https://raw.githubusercontent.com/ryzen30xx/WysePlay/main/install.sh | sudo bash -s -- --user ten_nguoi_dung
+
+# Ép biên dịch từ mã nguồn (không dùng bản pre-built từ GitHub Release)
+curl -fsSL https://raw.githubusercontent.com/ryzen30xx/WysePlay/main/install.sh | sudo bash -s -- --rebuild-uxplay
+
+# Chỉ định chế độ hiển thị mượt mà 720p 60fps (khuyến nghị cho TV Box cấu hình yếu)
+curl -fsSL https://raw.githubusercontent.com/ryzen30xx/WysePlay/main/install.sh | sudo bash -s -- --mode 720p
 ```
 
 ---
@@ -145,9 +153,14 @@ sudo systemctl restart airplay-kiosk.service
 
 ```text
 WysePlay/
+├── .github/
+│   └── workflows/
+│       └── build-uxplay.yml    # CI/CD tự động biên dịch UxPlay đa kiến trúc (ARM64 & x86_64)
 ├── install.sh                  # Bộ cài đặt tự động one-liner kèm pre-flight checks
 ├── README.md                   # Tài liệu hướng dẫn chi tiết
 ├── LICENSE                     # Giấy phép nguồn mở MIT
+├── patches/
+│   └── uxplay_customizations.patch # Bản vá tính năng Apple PIN, Zero-Latency & Device Name
 ├── config/
 │   ├── airplay-kiosk.service   # Mẫu dịch vụ systemd tự chạy nền
 │   ├── rc.xml                  # Cấu hình Openbox tối ưu (toàn màn hình, không viền)
