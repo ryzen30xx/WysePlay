@@ -851,7 +851,9 @@ def main():
         if decoder == 'v4l2slh264dec':
             extra_flags.extend(['-vd', 'v4l2slh264dec', '-vc', 'none'])
         elif decoder == 'avdec_h264':
-            extra_flags.extend(['-vd', 'avdec_h264', '-vc', 'none'])
+            extra_flags.extend(['-vd', 'avdec_h264 max-threads=1 thread-type=slice', '-vc', 'none'])
+        elif decoder == 'avdec_h265':
+            extra_flags.extend(['-vd', 'avdec_h265 max-threads=1 thread-type=slice', '-vc', 'none'])
         elif decoder and decoder not in ('avdec_h264', 'avdec_h265'):
             extra_flags.extend(['-vd', decoder])
 

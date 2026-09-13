@@ -121,7 +121,7 @@ index c275dc1..946aed2 100644
          retval = -1;
      }	  
 diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
-index 3b2c838..d295b4d 100644
+index 3b2c838..b7a5599 100644
 --- a/lib/raop_handlers.h
 +++ b/lib/raop_handlers.h
 @@ -118,7 +118,7 @@ raop_handler_info(raop_conn_t *conn,
@@ -133,19 +133,20 @@ index 3b2c838..d295b4d 100644
      plist_dict_set_item(res_node, "statusFlags", status_flags_node);
  
      plist_t keep_alive_low_power_node = plist_new_uint(1);
-@@ -194,6 +194,10 @@ raop_handler_pairpinstart(raop_conn_t *conn,
+@@ -194,7 +194,11 @@ raop_handler_pairpinstart(raop_conn_t *conn,
      if (conn->raop->callbacks.display_pin) {
           conn->raop->callbacks.display_pin(conn->raop->callbacks.cls, pin);
      }
+-    logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", pin);
 +    char client_ip[64] = {0};
 +    if (conn && conn->remote) {
 +        utils_ipaddress_to_string(conn->remotelen, conn->remote, conn->zone_id, client_ip, (int) sizeof(client_ip));
 +    }
--    logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", pin);
 +    logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT [%s] MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", client_ip, pin);
      *response_data = NULL;
      response_datalen = 0;
-@@ -436,6 +442,9 @@ raop_handler_pairverify(raop_conn_t *conn,
+ }
+@@ -436,6 +440,9 @@ raop_handler_pairverify(raop_conn_t *conn,
                  }
  
                  if (!registered_client) {
@@ -155,7 +156,7 @@ index 3b2c838..d295b4d 100644
                      return;
                  }
              }
-@@ -604,6 +613,15 @@ raop_handler_setup(raop_conn_t *conn,
+@@ -604,6 +611,15 @@ raop_handler_setup(raop_conn_t *conn,
              return;
  	}
  
@@ -172,10 +173,10 @@ index 3b2c838..d295b4d 100644
          memcpy(aesiv, eiv, 16);
          free(eiv);	
 diff --git a/lib/raop_rtp_mirror.c b/lib/raop_rtp_mirror.c
-index bc88472..0805e60 100644
+index bc88472..2e6bf2f 100644
 --- a/lib/raop_rtp_mirror.c
 +++ b/lib/raop_rtp_mirror.c
-@@ -287,6 +287,18 @@ raop_rtp_mirror_thread(void *arg)
+@@ -287,6 +287,22 @@ raop_rtp_mirror_thread(void *arg)
                  logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
                             "raop_rtp_mirror could not set stream socket keepalive probes %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
              }
@@ -185,6 +186,10 @@ index bc88472..0805e60 100644
 +                logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
 +                           "raop_rtp_mirror could not set TCP_NODELAY %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
 +            }
++#ifdef TCP_QUICKACK
++            option = 1;
++            setsockopt(stream_fd, IPPROTO_TCP, TCP_QUICKACK, CAST &option, sizeof(option));
++#endif
 +            int rcvbuf = 65536;
 +            if (setsockopt(stream_fd, SOL_SOCKET, SO_RCVBUF, CAST &rcvbuf, sizeof(rcvbuf)) < 0) {
 +                int sock_err = SOCKET_GET_ERROR();
@@ -208,7 +213,7 @@ index c390e68..46550d9 100644
          case 0:    /* AAC-ELD */
          case 2:    /* AAC-LC */
 diff --git a/renderers/video_renderer.c b/renderers/video_renderer.c
-index 4473901..fe389b2 100644
+index 4473901..965c641 100644
 --- a/renderers/video_renderer.c
 +++ b/renderers/video_renderer.c
 @@ -48,6 +48,15 @@ static bool video_terminate = false;
@@ -232,10 +237,10 @@ index 4473901..fe389b2 100644
              }
              GString *launch = g_string_new("appsrc name=video_source ! ");
 -            g_string_append(launch, "queue ! ");
-+            g_string_append(launch, "queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! ");
++            g_string_append(launch, "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
              g_string_append(launch, parser);
 -            g_string_append(launch, " ! ");
-+            g_string_append(launch, " ! queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! ");
++            g_string_append(launch, " ! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
              g_string_append(launch, decoder);
              g_string_append(launch, " ! ");
              append_videoflip(launch, &videoflip[0], &videoflip[1]);
@@ -255,7 +260,7 @@ index 4473901..fe389b2 100644
              g_assert(renderer_type[i]->appsrc);
  
 -            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, NULL);
-+            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 2, NULL);
++            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 1, NULL);
 +
 +            gchar *sink_name = g_strdup_printf("%s_%s", videosink, renderer_type[i]->codec);
 +            GstElement *sink_elem = gst_bin_get_by_name(GST_BIN(renderer_type[i]->pipeline), sink_name);

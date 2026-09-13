@@ -18,6 +18,9 @@ sudo sysctl -w net.core.rmem_max=16777216 2>/dev/null || true
 sudo sysctl -w net.core.rmem_default=4194304 2>/dev/null || true
 sudo sysctl -w net.core.wmem_max=16777216 2>/dev/null || true
 sudo sysctl -w net.ipv4.udp_rmem_min=16384 2>/dev/null || true
+sudo sysctl -w net.ipv4.tcp_autocorking=0 2>/dev/null || true
+sudo sysctl -w net.ipv4.tcp_low_latency=1 2>/dev/null || true
+sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384 2>/dev/null || true
 
 # Disable Wi-Fi power saving so latency stays constant and NTP/UDP packets aren't dropped
 sudo iw dev wlan0 set power_save off 2>/dev/null || true
