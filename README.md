@@ -35,6 +35,11 @@
 - 🔒 **Input Locking an toàn khi trình chiếu**:
   - Tự động vô hiệu hóa toàn bộ chuột và bàn phím vật lý khi có luồng AirPlay đang phản chiếu hình ảnh, ngăn chặn người ngoài can thiệp làm gián đoạn bài thuyết trình.
   - Tự động mở khóa trở lại khi kết thúc phiên chiếu.
+- 🔐 **Bảo mật chuẩn Apple AirPlay Code (One-time OTP PIN)**:
+  - Tự động hiển thị mã OTP 4 số trên màn hình TV khi có thiết bị mới kết nối.
+  - Tương thích hoàn hảo với giao diện **AirPlay Code** nguyên bản trên macOS / iOS.
+  - Tự động lưu thiết bị vào Whitelist (`registered_clients.txt`) sau khi ghép đôi thành công; các lần kết nối sau tự động xác thực tức thì mà không cần nhập lại mã.
+  - Chống vượt rào (bypass) trái phép ở tầng giao thức RTSP (`SETUP`), bảo vệ quyền riêng tư phòng họp.
 - ⚡ **Thiết bị vận hành độc lập (Zero-touch Appliance)**:
   - Tự động khởi động trực tiếp vào Kiosk thông qua `systemd` và môi trường X11 siêu nhẹ (Openbox).
   - Không hiện con trỏ chuột, không hiện viền cửa sổ, tự phục hồi tức thì nếu có lỗi.
