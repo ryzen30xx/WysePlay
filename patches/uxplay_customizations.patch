@@ -18,7 +18,7 @@ index 0725937..244e32d 100644
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "tp", strlen(RAOP_TP), RAOP_TP);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "txtvers", strlen(RAOP_TXTVERS), RAOP_TXTVERS);
 -    dnssd->TXTRecordSetValue(&dnssd->raop_record, "sf", strlen(RAOP_SF), RAOP_SF);
-+    dnssd->TXTRecordSetValue(&dnssd->raop_record, "sf", strlen(dnssd->require_pw ? "0x204" : RAOP_SF), dnssd->require_pw ? "0x204" : RAOP_SF);
++    dnssd->TXTRecordSetValue(&dnssd->raop_record, "sf", strlen(RAOP_SF), RAOP_SF);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "vs", strlen(RAOP_VS), RAOP_VS);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "vn", strlen(RAOP_VN), RAOP_VN);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "pk", strlen(dnssd->pk), dnssd->pk);
@@ -31,7 +31,7 @@ index 0725937..244e32d 100644
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "deviceid", strlen(device_id), device_id);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "features", strlen(features), features);
 -    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "flags", strlen(AIRPLAY_FLAGS), AIRPLAY_FLAGS);
-+    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "flags", strlen(dnssd->require_pw ? "0x204" : AIRPLAY_FLAGS), dnssd->require_pw ? "0x204" : AIRPLAY_FLAGS);
++    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "flags", strlen(AIRPLAY_FLAGS), AIRPLAY_FLAGS);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "model", strlen(GLOBAL_MODEL), GLOBAL_MODEL);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pk", strlen(dnssd->pk), dnssd->pk);
 -    if (dnssd->require_pw) {
