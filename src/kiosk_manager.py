@@ -779,7 +779,10 @@ def main():
             if decoder == "v4l2slh264dec":
                 decoder = "avdec_h264"
             raw_sink = profile.get("video_sink", "autovideosink")
-            video_sink = "autovideosink" if raw_sink in ("ximagesink", "", None) else raw_sink
+            if raw_sink in ("ximagesink", "kmssink", "", None):
+                video_sink = "xvimagesink" if shutil.which("xvinfo") else "autovideosink"
+            else:
+                video_sink = raw_sink
             print(f"[Kiosk] Benchmark Profile active: {sp.get('tier', 'Custom')} -> Stream: {target_res}@{target_fps}fps (H.265: {target_h265}, Decoder: {decoder}, Sink: {video_sink})")
         else:
             print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps")

@@ -386,7 +386,9 @@ def check_cma_memory(soc_platform="generic"):
 def detect_best_video_sink():
     """
     Detects the highest performing video sink available on the system.
-    Returns sink element string, e.g. 'xvimagesink', 'glimagesink', 'kmssink', or 'autovideosink'.
+    Returns sink element string, e.g. 'xvimagesink', 'glimagesink', or 'autovideosink'.
+    NOTE: Never return 'kmssink' because WysePlay runs inside X11/Openbox where
+    Xorg holds the DRM master, causing kmssink to fail with 'Could not open DRM module'.
     """
     disp = os.environ.get("DISPLAY") or (":0" if os.path.exists("/tmp/.X11-unix/X0") else None)
     if disp:
@@ -399,13 +401,8 @@ def detect_best_video_sink():
         except Exception:
             pass
 
-    if not disp and shutil.which("gst-inspect-1.0"):
-        try:
-            p = subprocess.run(["gst-inspect-1.0", "kmssink"], capture_output=True, timeout=2)
-            if p.returncode == 0 and os.path.exists("/dev/dri/card0"):
-                return "kmssink"
-        except Exception:
-            pass
+    if shutil.which("xvinfo"):
+        return "xvimagesink"
 
     return "autovideosink"
 
