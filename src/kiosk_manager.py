@@ -876,6 +876,21 @@ def main():
             '-key', '/opt/airplay/server.pem'
         ])
 
+        # Ensure MAC address / deviceid matches active interface
+        try:
+            r_route = subprocess.check_output("ip route get 1.1.1.1 2>/dev/null", shell=True, text=True)
+            m_iface = re.search(r"dev\s+(\S+)", r_route)
+            if m_iface:
+                iface_name = m_iface.group(1)
+                with open(f"/sys/class/net/{iface_name}/address") as f_mac:
+                    act_mac = f_mac.read().strip()
+                    if act_mac:
+                        print(f"[Kiosk] Binding UxPlay to active interface '{iface_name}' MAC: {act_mac}")
+                        extra_flags.extend(['-m', act_mac])
+        except Exception as e:
+            print(f"[Kiosk] Warning: Failed to detect active MAC: {e}")
+
+
         # Check if connected digital display (HDMI/DisplayPort) has audio capability
         if not has_audio:
             print(f"[Kiosk] Display Audio Check: Thiết bị '{monitor_name}' KHÔNG có loa/âm thanh ({audio_reason}). Tự động tắt quảng bá Audio (-a) để thiết bị phát giữ nguyên âm thanh loa máy tính!")
