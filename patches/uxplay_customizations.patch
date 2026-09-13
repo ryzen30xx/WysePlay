@@ -176,7 +176,7 @@ diff --git a/lib/raop_rtp_mirror.c b/lib/raop_rtp_mirror.c
 index bc88472..2e6bf2f 100644
 --- a/lib/raop_rtp_mirror.c
 +++ b/lib/raop_rtp_mirror.c
-@@ -287,6 +287,22 @@ raop_rtp_mirror_thread(void *arg)
+@@ -287,6 +287,16 @@ raop_rtp_mirror_thread(void *arg)
                  logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
                             "raop_rtp_mirror could not set stream socket keepalive probes %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
              }
@@ -190,12 +190,6 @@ index bc88472..2e6bf2f 100644
 +            option = 1;
 +            setsockopt(stream_fd, IPPROTO_TCP, TCP_QUICKACK, CAST &option, sizeof(option));
 +#endif
-+            int rcvbuf = 65536;
-+            if (setsockopt(stream_fd, SOL_SOCKET, SO_RCVBUF, CAST &rcvbuf, sizeof(rcvbuf)) < 0) {
-+                int sock_err = SOCKET_GET_ERROR();
-+                logger_log(raop_rtp_mirror->logger, LOGGER_WARNING,
-+                           "raop_rtp_mirror could not set SO_RCVBUF %d %s", sock_err, SOCKET_ERROR_STRING(sock_err));
-+            }
              readstart = 0;
          }
  
@@ -237,10 +231,10 @@ index 4473901..965c641 100644
              }
              GString *launch = g_string_new("appsrc name=video_source ! ");
 -            g_string_append(launch, "queue ! ");
-+            g_string_append(launch, "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
++            g_string_append(launch, "queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, parser);
 -            g_string_append(launch, " ! ");
-+            g_string_append(launch, " ! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
++            g_string_append(launch, " ! queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, decoder);
              g_string_append(launch, " ! ");
              append_videoflip(launch, &videoflip[0], &videoflip[1]);
@@ -260,7 +254,7 @@ index 4473901..965c641 100644
              g_assert(renderer_type[i]->appsrc);
  
 -            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, NULL);
-+            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 1, NULL);
++            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 4, NULL);
 +
 +            gchar *sink_name = g_strdup_printf("%s_%s", videosink, renderer_type[i]->codec);
 +            GstElement *sink_elem = gst_bin_get_by_name(GST_BIN(renderer_type[i]->pipeline), sink_name);
