@@ -1,5 +1,5 @@
 diff --git a/lib/dnssd.c b/lib/dnssd.c
-index 0725937..9f1c32f 100644
+index 0725937..244e32d 100644
 --- a/lib/dnssd.c
 +++ b/lib/dnssd.c
 @@ -302,20 +302,17 @@ dnssd_register_raop(dnssd_t *dnssd, unsigned short port)
@@ -11,7 +11,7 @@ index 0725937..9f1c32f 100644
 -    } else {
 -        dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen("false"), "false");
 -    }
-+    dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen(dnssd->require_pw ? "true" : "false"), dnssd->require_pw ? "true" : "false");
++    dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen("false"), "false");
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "sr", strlen(RAOP_SR), RAOP_SR);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "ss", strlen(RAOP_SS), RAOP_SS);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "sv", strlen(RAOP_SV), RAOP_SV);
@@ -39,7 +39,7 @@ index 0725937..9f1c32f 100644
 -    } else {
 -        dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen("false"), "false");
 -    }	  
-+    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen(dnssd->require_pw ? "true" : "false"), dnssd->require_pw ? "true" : "false");	  
++    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen("false"), "false");	  
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pi", strlen(AIRPLAY_PI), AIRPLAY_PI);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "srcvers", strlen(AIRPLAY_SRCVERS), AIRPLAY_SRCVERS);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "vv", strlen(AIRPLAY_VV), AIRPLAY_VV);
