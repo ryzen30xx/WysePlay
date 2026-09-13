@@ -1,8 +1,8 @@
 diff --git a/lib/dnssd.c b/lib/dnssd.c
-index 0725937..015ec2c 100644
+index 0725937..9f1c32f 100644
 --- a/lib/dnssd.c
 +++ b/lib/dnssd.c
-@@ -302,11 +302,7 @@ dnssd_register_raop(dnssd_t *dnssd, unsigned short port)
+@@ -302,20 +302,17 @@ dnssd_register_raop(dnssd_t *dnssd, unsigned short port)
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "am", strlen(GLOBAL_MODEL), GLOBAL_MODEL);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "md", strlen(RAOP_MD), RAOP_MD);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "rhd", strlen(RAOP_RHD), RAOP_RHD);
@@ -11,11 +11,14 @@ index 0725937..015ec2c 100644
 -    } else {
 -        dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen("false"), "false");
 -    }
-+    dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen("false"), "false");
++    dnssd->TXTRecordSetValue(&dnssd->raop_record, "pw", strlen(dnssd->require_pw ? "true" : "false"), dnssd->require_pw ? "true" : "false");
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "sr", strlen(RAOP_SR), RAOP_SR);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "ss", strlen(RAOP_SS), RAOP_SS);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "sv", strlen(RAOP_SV), RAOP_SV);
-@@ -316,6 +312,7 @@ dnssd_register_raop(dnssd_t *dnssd, unsigned short port)
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "tp", strlen(RAOP_TP), RAOP_TP);
+     dnssd->TXTRecordSetValue(&dnssd->raop_record, "txtvers", strlen(RAOP_TXTVERS), RAOP_TXTVERS);
+-    dnssd->TXTRecordSetValue(&dnssd->raop_record, "sf", strlen(RAOP_SF), RAOP_SF);
++    dnssd->TXTRecordSetValue(&dnssd->raop_record, "sf", strlen(dnssd->require_pw ? "0x204" : RAOP_SF), dnssd->require_pw ? "0x204" : RAOP_SF);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "vs", strlen(RAOP_VS), RAOP_VS);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "vn", strlen(RAOP_VN), RAOP_VN);
      dnssd->TXTRecordSetValue(&dnssd->raop_record, "pk", strlen(dnssd->pk), dnssd->pk);
@@ -23,8 +26,12 @@ index 0725937..015ec2c 100644
  
      /* Convert hardware address to string */
      if (utils_hwaddr_raop(servname, sizeof(servname), dnssd->hw_addr, dnssd->hw_addr_len) < 0) {
-@@ -368,11 +365,7 @@ dnssd_register_airplay(dnssd_t *dnssd, unsigned short port)
-     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "flags", strlen(AIRPLAY_FLAGS), AIRPLAY_FLAGS);
+@@ -365,14 +362,10 @@ dnssd_register_airplay(dnssd_t *dnssd, unsigned short port)
+     dnssd->TXTRecordCreate(&dnssd->airplay_record, 0, NULL);
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "deviceid", strlen(device_id), device_id);
+     dnssd->TXTRecordSetValue(&dnssd->airplay_record, "features", strlen(features), features);
+-    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "flags", strlen(AIRPLAY_FLAGS), AIRPLAY_FLAGS);
++    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "flags", strlen(dnssd->require_pw ? "0x204" : AIRPLAY_FLAGS), dnssd->require_pw ? "0x204" : AIRPLAY_FLAGS);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "model", strlen(GLOBAL_MODEL), GLOBAL_MODEL);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pk", strlen(dnssd->pk), dnssd->pk);
 -    if (dnssd->require_pw) {
@@ -32,15 +39,31 @@ index 0725937..015ec2c 100644
 -    } else {
 -        dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen("false"), "false");
 -    }	  
-+    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen("false"), "false");	  
++    dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pw", strlen(dnssd->require_pw ? "true" : "false"), dnssd->require_pw ? "true" : "false");	  
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "pi", strlen(AIRPLAY_PI), AIRPLAY_PI);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "srcvers", strlen(AIRPLAY_SRCVERS), AIRPLAY_SRCVERS);
      dnssd->TXTRecordSetValue(&dnssd->airplay_record, "vv", strlen(AIRPLAY_VV), AIRPLAY_VV);
 diff --git a/lib/pairing.c b/lib/pairing.c
-index e60273c..8a14e4e 100644
+index e60273c..d886467 100644
 --- a/lib/pairing.c
 +++ b/lib/pairing.c
-@@ -449,9 +449,9 @@ srp_confirm_pair_setup(pairing_session_t *session, pairing_t *pairing,
+@@ -147,6 +147,15 @@ pairing_session_set_setup_status(pairing_session_t *session)
+     session->status = STATUS_SETUP;
+ }
+ 
++int
++pairing_session_is_authenticated(pairing_session_t *session)
++{
++    if (!session) return 0;
++    if (session->pair_setup) return 1;
++    if (session->status == STATUS_SETUP || session->status == STATUS_HANDSHAKE || session->status == STATUS_FINISHED) return 1;
++    return 0;
++}
++
+ int
+ pairing_session_check_handshake_status(pairing_session_t *session)
+ {
+@@ -449,9 +458,9 @@ srp_confirm_pair_setup(pairing_session_t *session, pairing_t *pairing,
  
  void access_client_session_data(pairing_session_t *session, char **username, char **client_pk64, bool *setup) {
      int len64 = 4 * (1 + (ED25519_KEY_SIZE / 3)) + 1;
@@ -52,6 +75,20 @@ index e60273c..8a14e4e 100644
          *client_pk64 = (char *) malloc(len64);
          pk_to_base64(session->client_pk, ED25519_KEY_SIZE, *client_pk64, len64);
      } else {
+diff --git a/lib/pairing.h b/lib/pairing.h
+index 54db62b..c9a1e9d 100644
+--- a/lib/pairing.h
++++ b/lib/pairing.h
+@@ -41,7 +41,9 @@ void pairing_get_public_key(pairing_t *pairing, unsigned char public_key[ED25519
+ 
+ pairing_session_t *pairing_session_init(pairing_t *pairing);
+ void pairing_session_set_setup_status(pairing_session_t *session);
++int pairing_session_is_authenticated(pairing_session_t *session);
+ int pairing_session_check_handshake_status(pairing_session_t *session);
++
+ int pairing_session_handshake(pairing_session_t *session, const unsigned char ecdh_key[X25519_KEY_SIZE],
+                               const unsigned char ed_key[ED25519_KEY_SIZE]);
+ int pairing_session_get_public_key(pairing_session_t *session, unsigned char ecdh_key[X25519_KEY_SIZE]);
 diff --git a/lib/raop.c b/lib/raop.c
 index c275dc1..946aed2 100644
 --- a/lib/raop.c
@@ -84,9 +121,18 @@ index c275dc1..946aed2 100644
          retval = -1;
      }	  
 diff --git a/lib/raop_handlers.h b/lib/raop_handlers.h
-index 3b2c838..4cd9458 100644
+index 3b2c838..d295b4d 100644
 --- a/lib/raop_handlers.h
 +++ b/lib/raop_handlers.h
+@@ -118,7 +118,7 @@ raop_handler_info(raop_conn_t *conn,
+     plist_t vv_node = plist_new_uint(strtol(AIRPLAY_VV, NULL, 10));
+     plist_dict_set_item(res_node, "vv", vv_node);
+ 
+-    plist_t status_flags_node = plist_new_uint(68);
++    plist_t status_flags_node = plist_new_uint(conn->raop->use_pin ? 580 : 68);
+     plist_dict_set_item(res_node, "statusFlags", status_flags_node);
+ 
+     plist_t keep_alive_low_power_node = plist_new_uint(1);
 @@ -194,6 +194,12 @@ raop_handler_pairpinstart(raop_conn_t *conn,
      if (conn->raop->callbacks.display_pin) {
           conn->raop->callbacks.display_pin(conn->raop->callbacks.cls, pin);
@@ -100,6 +146,32 @@ index 3b2c838..4cd9458 100644
      logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", pin);
      *response_data = NULL;
      response_datalen = 0;
+@@ -436,6 +442,9 @@ raop_handler_pairverify(raop_conn_t *conn,
+                 }
+ 
+                 if (!registered_client) {
++                    logger_log(conn->raop->logger, LOGGER_ERR, "*** CLIENT PAIRING REGISTRATION NOT FOUND: REJECTING PAIR-VERIFY (470) TO REQUIRE PIN OTP ***");
++                    http_response_init(response, "RTSP/1.0", 470, "Client Authentication Failure");
++                    http_response_set_disconnect(response, 1);
+                     return;
+                 }
+             }
+@@ -604,6 +613,15 @@ raop_handler_setup(raop_conn_t *conn,
+             return;
+ 	}
+ 
++        if (conn->raop->use_pin && !pairing_session_is_authenticated(conn->session)) {
++            logger_log(conn->raop->logger, LOGGER_ERR, "*** REJECTING UNAUTHENTICATED SETUP: CLIENT MUST ENTER PIN FIRST ***");
++            http_response_init(response, "RTSP/1.0", 470, "Client Authentication Failure");
++            http_response_set_disconnect(response, 1);
++            plist_free(res_root_node);
++            plist_free(req_root_node);
++            return;
++        }
++
+         plist_get_data_val(req_eiv_node, &eiv, &eiv_len);
+         memcpy(aesiv, eiv, 16);
+         free(eiv);	
 diff --git a/lib/raop_rtp_mirror.c b/lib/raop_rtp_mirror.c
 index bc88472..0805e60 100644
 --- a/lib/raop_rtp_mirror.c
@@ -137,7 +209,7 @@ index c390e68..46550d9 100644
          case 0:    /* AAC-ELD */
          case 2:    /* AAC-LC */
 diff --git a/renderers/video_renderer.c b/renderers/video_renderer.c
-index 4473901..ec52787 100644
+index 4473901..fe389b2 100644
 --- a/renderers/video_renderer.c
 +++ b/renderers/video_renderer.c
 @@ -48,6 +48,15 @@ static bool video_terminate = false;
@@ -161,10 +233,10 @@ index 4473901..ec52787 100644
              }
              GString *launch = g_string_new("appsrc name=video_source ! ");
 -            g_string_append(launch, "queue ! ");
-+            g_string_append(launch, "queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! ");
++            g_string_append(launch, "queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, parser);
 -            g_string_append(launch, " ! ");
-+            g_string_append(launch, " ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! ");
++            g_string_append(launch, " ! queue max-size-buffers=4 max-size-bytes=0 max-size-time=0 ! ");
              g_string_append(launch, decoder);
              g_string_append(launch, " ! ");
              append_videoflip(launch, &videoflip[0], &videoflip[1]);
@@ -182,7 +254,7 @@ index 4473901..ec52787 100644
 @@ -313,7 +324,19 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
              renderer_type[i]->appsrc = gst_bin_get_by_name (GST_BIN (renderer_type[i]->pipeline), "video_source");
              g_assert(renderer_type[i]->appsrc);
-
+ 
 -            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, NULL);
 +            g_object_set(renderer_type[i]->appsrc, "caps", caps, "stream-type", 0, "is-live", TRUE, "format", GST_FORMAT_TIME, "block", FALSE, "max-buffers", (guint64) 2, NULL);
 +
@@ -232,7 +304,7 @@ index 4473901..ec52787 100644
      GstClockTime pts = (GstClockTime) *ntp_time; /*now in nsecs */
      //GstClockTimeDiff latency = GST_CLOCK_DIFF(gst_element_get_current_clock_time (renderer->appsrc), pts);
 diff --git a/uxplay.cpp b/uxplay.cpp
-index 3246ffd..18a9fb9 100644
+index 3246ffd..63939ba 100644
 --- a/uxplay.cpp
 +++ b/uxplay.cpp
 @@ -171,6 +171,7 @@ static void log(int level, const char* format, ...) {
@@ -331,7 +403,33 @@ index 3246ffd..18a9fb9 100644
      if (!registration_list) {
        /* we are not maintaining a list of registered clients */
          return;
-@@ -1966,6 +1978,7 @@ static int start_raop_server (unsigned short display[5], unsigned short tcp[3],
+@@ -1829,6 +1841,25 @@ extern "C" bool check_register(void *cls, const char *client_pk) {
+     }
+     LOGD("check returning client's pairing registration");
+     std::string pk = client_pk;
++
++    /* Reload directly from file if registration file is configured */
++    if (strlen(pairing_register.c_str())) {
++        registered_keys.clear();
++        std::ifstream file(pairing_register);
++        if (file.is_open()) {
++            std::string line;
++            std::string key;
++            while (std::getline(file, line)) {
++                if (line.length() >= 44) {
++                    line[44] = '\0';
++                    std::string k = line.c_str();
++                    registered_keys.push_back(key.assign(k));
++                }
++            }
++            file.close();
++        }
++    }
++
+     if (std::find(registered_keys.rbegin(), registered_keys.rend(), pk) != registered_keys.rend()) {
+         LOGD("registration found: PK=%s", client_pk);
+         return true;
+@@ -1966,6 +1997,7 @@ static int start_raop_server (unsigned short display[5], unsigned short tcp[3],
      if (audiodelay >= 0) raop_set_plist(raop, "audio_delay_micros", audiodelay);
      if (require_password) raop_set_plist(raop, "pin", (int) pin);
      if (hls_support) raop_set_plist(raop, "hls", 1);
@@ -339,7 +437,7 @@ index 3246ffd..18a9fb9 100644
  
      /* network port selection (ports listed as "0" will be dynamically assigned) */
      raop_set_tcp_ports(raop, tcp);
-@@ -2105,6 +2118,8 @@ int main (int argc, char *argv[]) {
+@@ -2105,6 +2137,8 @@ int main (int argc, char *argv[]) {
      parse_arguments (argc, argv);
  
      log_level = (debug_log ? LOGGER_DEBUG : LOGGER_INFO);
@@ -348,7 +446,7 @@ index 3246ffd..18a9fb9 100644
      
  #ifdef _WIN32    /*  use utf-8 terminal output; don't buffer stdout in WIN32 when debug_log = false */
      SetConsoleOutputCP(CP_UTF8);
-@@ -2189,11 +2204,12 @@ int main (int argc, char *argv[]) {
+@@ -2189,11 +2223,12 @@ int main (int argc, char *argv[]) {
          if (file.is_open()) {
              std::string line;
              while (std::getline(file, line)) {

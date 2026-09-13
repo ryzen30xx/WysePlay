@@ -660,7 +660,8 @@ def main():
         # Zero-latency live mirroring mode, persistent client whitelist & PIN prompt
         extra_flags.extend([
             '-pin',
-            '-reg', '/opt/airplay/registered_clients.txt'
+            '-reg', '/opt/airplay/registered_clients.txt',
+            '-key', '/opt/airplay/server.pem'
         ])
 
         # Check if connected digital display (HDMI/DisplayPort) has audio capability
