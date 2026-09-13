@@ -8,13 +8,13 @@ import sys, os, time, subprocess, signal
 
 TVBOX_IPS = ["192.168.2.133", "192.168.2.97", "192.168.2.20"]
 TVBOX_HOSTNAME = "x96q-lan.local."
-AIRPLAY_NAME = "P27FBA-RAGL"
+AIRPLAY_NAME = "TV Box X96Q"
 RAOP_NAME = f"0200D5218EC0@{AIRPLAY_NAME}"
 
 AIRPLAY_TXT = [
     "deviceid=02:00:d5:21:8e:c0",
     "features=0x5A7FFEE6,0x0",
-    "flags=0x204",
+    "flags=0x4",
     "model=AppleTV3,2",
     "pk=a130efa531a109bccb8d1483f26227bacc6b2df48eaaa7c05804f5a89c6c1d17",
     "pw=false",
@@ -27,7 +27,7 @@ RAOP_TXT = [
     "ch=2", "cn=0,1,2,3", "da=true", "et=0,3,5", "vv=2",
     "ft=0x5A7FFEE6,0x0", "am=AppleTV3,2", "md=0,1,2", "rhd=5.6.0.0",
     "pw=false", "sr=44100", "ss=16", "sv=false", "tp=UDP", "txtvers=1",
-    "sf=0x204", "vs=220.68", "vn=65537",
+    "sf=0x4", "vs=220.68", "vn=65537",
     "pk=a130efa531a109bccb8d1483f26227bacc6b2df48eaaa7c05804f5a89c6c1d17",
     "pi=2e388006-13ba-4041-9a67-25dd4a43d536"
 ]
