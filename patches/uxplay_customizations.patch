@@ -7,12 +7,12 @@ index 6a457d0..4bfdec1 100644
  #define RAOP_ET "0,3,5"         /* Encryption type: None, FairPlay, FairPlay SAPv2.5 */
  #define RAOP_VV "2"
 -#define FEATURES_1 "0x5A7FFEE6" /* first 32 bits of features, with bit 27 ("supports legacy pairing") ON */
-+#define FEATURES_1 "0x527FFEE6" /* first 32 bits of features, with bit 27 ("supports legacy pairing") ON */
++#define FEATURES_1 "0x5A7FFEE6" /* first 32 bits of features, with bit 27 ("supports legacy pairing") ON */
  //#define FEATURES_1 "0x527FFEE6" /* first 32 bits of features, with bit 27 ("supports legacy pairing") OFF */
  #define FEATURES_2  "0x0"        /* second 32 bits of features */
  #define RAOP_RHD "5.6.0.0"
 -#define RAOP_SF "0x4"
-+#define RAOP_SF "0x204"
++#define RAOP_SF "0x4"
  #define RAOP_SV "false"
  #define RAOP_DA "true"
  #define RAOP_SR "44100"         /* Sample rate: 44100 */
@@ -21,7 +21,7 @@ index 6a457d0..4bfdec1 100644
  
  #define AIRPLAY_SRCVERS GLOBAL_VERSION /*defined in global.h */
 -#define AIRPLAY_FLAGS "0x4"
-+#define AIRPLAY_FLAGS "0x204"
++#define AIRPLAY_FLAGS "0x4"
  #define AIRPLAY_VV "2"
  #define AIRPLAY_PI "2e388006-13ba-4041-9a67-25dd4a43d536"
  
@@ -382,23 +382,6 @@ index 3246ffd..63939ba 100644
      }
      if ((dnssd_error = dnssd_register_airplay(dnssd, airplay_port))) {
          LOGE("dnssd_register_airplay failed with error code %d\n"
-@@ -1420,7 +1421,7 @@ static int start_dnssd(std::vector<char> hw_addr, std::string name) {
-     dnssd_set_airplay_features(dnssd, 24, 0); // 
-     dnssd_set_airplay_features(dnssd, 25, 1); // 
-     dnssd_set_airplay_features(dnssd, 26, 0); // Has Unified Advertiser info
--    dnssd_set_airplay_features(dnssd, 27, 1); // Supports Legacy Pairing
-+    dnssd_set_airplay_features(dnssd, 27, 0); // Supports Legacy Pairing
- 
-     dnssd_set_airplay_features(dnssd, 28, 1); //  
-     dnssd_set_airplay_features(dnssd, 29, 0); // 
-@@ -1478,7 +1479,7 @@ static int start_dnssd(std::vector<char> hw_addr, std::string name) {
-     dnssd_set_airplay_features(dnssd, 42, (int) h265_support);
- 
-     /* bit 27 of Features determines whether the AirPlay2 client-pairing protocol will be used (1) or not (0) */
--    dnssd_set_airplay_features(dnssd, 27, (int) setup_legacy_pairing);
-+    dnssd_set_airplay_features(dnssd, 27, 0);
-     return 0;
- }
  
 @@ -1524,6 +1525,14 @@ extern "C" void video_set_codec(void *cls, video_codec_t codec) {
  }
