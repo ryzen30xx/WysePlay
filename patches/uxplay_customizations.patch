@@ -133,17 +133,16 @@ index 3b2c838..d295b4d 100644
      plist_dict_set_item(res_node, "statusFlags", status_flags_node);
  
      plist_t keep_alive_low_power_node = plist_new_uint(1);
-@@ -194,6 +194,12 @@ raop_handler_pairpinstart(raop_conn_t *conn,
+@@ -194,6 +194,10 @@ raop_handler_pairpinstart(raop_conn_t *conn,
      if (conn->raop->callbacks.display_pin) {
           conn->raop->callbacks.display_pin(conn->raop->callbacks.cls, pin);
      }
-+    FILE *fp_pin = fopen("/tmp/airplay_pin.txt", "w");
-+    if (fp_pin) {
-+        fprintf(fp_pin, "%s\n", pin);
-+        fflush(fp_pin);
-+        fclose(fp_pin);
++    char client_ip[64] = {0};
++    if (conn && conn->remote) {
++        utils_ipaddress_to_string(conn->remotelen, conn->remote, conn->zone_id, client_ip, (int) sizeof(client_ip));
 +    }
-     logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", pin);
+-    logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", pin);
++    logger_log(conn->raop->logger, LOGGER_INFO, "*** CLIENT [%s] MUST NOW ENTER PIN = \"%s\" AS AIRPLAY PASSWORD", client_ip, pin);
      *response_data = NULL;
      response_datalen = 0;
 @@ -436,6 +442,9 @@ raop_handler_pairverify(raop_conn_t *conn,

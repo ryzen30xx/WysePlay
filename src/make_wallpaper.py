@@ -368,9 +368,8 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
         return ImageFont.load_default()
 
     font_title  = get_font("SFProDisplay-Heavy.ttf", int(50 * scale))
-    font_label  = get_font("SFProText-Semibold.ttf", int(17 * scale))
-    font_name   = get_font("SFProDisplay-Bold.ttf", int(21 * scale))
-    font_status = get_font("SFProText-Semibold.ttf", int(17 * scale))
+    font_label  = get_font("SFProText-Medium.ttf", int(17 * scale))
+    font_name   = get_font("SFProText-Bold.ttf", int(17 * scale))
     font_inst1  = get_font("SFProText-Medium.ttf", int(17 * scale))
     font_inst2  = get_font("SFProText-Medium.ttf", int(16 * scale))
 
@@ -429,42 +428,27 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     gap_title_pill = int((24 if wifi_gui_showing else 26) * scale)
     lbl_txt = "Tên thiết bị: "
     val_txt = monitor_name
-    b_lbl = draw.textbbox((0, 0), lbl_txt, font=font_label)
-    b_val = draw.textbbox((0, 0), val_txt, font=font_name)
-    pad_x, pad_y = int(26 * scale), int(13 * scale)
-    pill_w = (b_lbl[2] - b_lbl[0]) + (b_val[2] - b_val[0]) + pad_x * 2
-    pill_h = max(b_lbl[3] - b_lbl[1], b_val[3] - b_val[1]) + pad_y * 2
+    b_lbl = font_label.getbbox(lbl_txt)
+    b_val = font_name.getbbox(val_txt)
+    lbl_w = b_lbl[2] - b_lbl[0]
+    val_w = b_val[2] - b_val[0]
+    pad_x = int(24 * scale)
+    pad_y = int(11 * scale)
 
-    gap_pill_stat = int((24 if wifi_gui_showing else 26) * scale)
+    try:
+        ascent_lbl, descent_lbl = font_label.getmetrics()
+        ascent_val, descent_val = font_name.getmetrics()
+    except Exception:
+        ascent_lbl, descent_lbl = int(14 * scale), int(4 * scale)
+        ascent_val, descent_val = int(14 * scale), int(4 * scale)
+
+    line_h = max(ascent_lbl + descent_lbl, ascent_val + descent_val)
+    pill_w = lbl_w + val_w + pad_x * 2
+    pill_h = line_h + pad_y * 2
+
+    gap_pill_inst = int((28 if wifi_gui_showing else 32) * scale)
 
     if has_network:
-        stat_color = '#30d158'
-        if net_type == "LAN":
-            if ip and ip != "127.0.0.1":
-                stat_text = "● Đang kết nối mạng LAN"
-            else:
-                stat_text = "● Đã cắm cáp LAN (Đang nhận IP...)"
-            net_text = ""
-        else:
-            net_label = f"Wi-Fi: {ssid}" if ssid else "Wi-Fi"
-            if ip and ip != "127.0.0.1":
-                stat_text = f"● Đang kết nối {net_label}"
-            else:
-                stat_text = f"● Đã kết nối {net_label} (Đang nhận IP...)"
-            net_text = ""
-        b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
-        stat_h = b_stat[3] - b_stat[1]
-
-        has_net_line = bool(net_text)
-        if has_net_line:
-            b_net = draw.textbbox((0, 0), net_text, font=font_status)
-            net_h = b_net[3] - b_net[1]
-            gap_stat_net = int(14 * scale)
-        else:
-            net_h = 0
-            gap_stat_net = 0
-
-        gap_net_inst = int((22 if wifi_gui_showing else 26) * scale)
         inst1 = "Mở Trung tâm điều khiển trên iPhone, iPad hoặc Mac"
         inst2 = f'Chọn "{monitor_name}" để kết nối'
         b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
@@ -472,15 +456,8 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
         inst_h = (b_i1[3] - b_i1[1]) + int(10 * scale) + (b_i2[3] - b_i2[1])
 
         total_h = (target_icon_h + gap_icon_title + title_h + gap_title_pill +
-                   pill_h + gap_pill_stat + stat_h + (gap_stat_net + net_h if has_net_line else 0) +
-                   gap_net_inst + inst_h)
+                   pill_h + gap_pill_inst + inst_h)
     else:
-        stat_text = "● Chưa có kết nối mạng"
-        stat_color = '#ff9f0a'
-        b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
-        stat_h = b_stat[3] - b_stat[1]
-
-        gap_stat_inst = int(22 * scale)
         inst1 = "Vui lòng chọn mạng Wi-Fi để kết nối."
         inst2 = "Dùng phím ↑ ↓ và Enter trên bàn phím"
         b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
@@ -488,7 +465,7 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
         inst_h = (b_i1[3] - b_i1[1]) + int(10 * scale) + (b_i2[3] - b_i2[1])
 
         total_h = (target_icon_h + gap_icon_title + title_h + gap_title_pill +
-                   pill_h + gap_pill_stat + stat_h + gap_stat_inst + inst_h)
+                   pill_h + gap_pill_inst + inst_h)
 
     current_y = (H - total_h) // 2
 
@@ -501,27 +478,14 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     draw.text((center_x - (b_title[2] - b_title[0]) // 2, current_y), t_title, fill='#ffffff', font=font_title)
     current_y += title_h + gap_title_pill
 
-    # Draw Device Pill Badge
+    # Draw Device Pill Badge (perfect baseline alignment)
     pill_x = center_x - pill_w // 2
     draw.rounded_rectangle([pill_x, current_y, pill_x + pill_w, current_y + pill_h],
                            radius=int(16 * scale), fill='#1c1c1e', outline='#3a3a3c', width=int(1.5 * scale))
-    draw.text((pill_x + pad_x, current_y + pad_y), lbl_txt, fill='#aeaeb2', font=font_label)
-    draw.text((pill_x + pad_x + (b_lbl[2] - b_lbl[0]), current_y + pad_y), val_txt, fill='#ffffff', font=font_name)
-    current_y += pill_h + gap_pill_stat
-
-    # Draw Status
-    draw.text((center_x - (b_stat[2] - b_stat[0]) // 2, current_y), stat_text, fill=stat_color, font=font_status)
-    current_y += stat_h
-
-    # Draw Network Status if available
-    if has_network and has_net_line:
-        current_y += gap_stat_net
-        draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill='#aeaeb2', font=font_status)
-        current_y += net_h + gap_net_inst
-    elif has_network:
-        current_y += gap_net_inst
-    else:
-        current_y += gap_stat_inst
+    baseline_y = current_y + pad_y + max(ascent_lbl, ascent_val)
+    draw.text((pill_x + pad_x, baseline_y), lbl_txt, fill='#aeaeb2', font=font_label, anchor="ls")
+    draw.text((pill_x + pad_x + lbl_w, baseline_y), val_txt, fill='#ffffff', font=font_name, anchor="ls")
+    current_y += pill_h + gap_pill_inst
 
     # Draw Step Instructions
     draw.text((center_x - (b_i1[2] - b_i1[0]) // 2, current_y), inst1, fill='#f5f5f7', font=font_inst1)

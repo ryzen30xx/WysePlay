@@ -24,6 +24,163 @@ LAST_ACTIVITY = time.time()
 MONITOR_ASLEEP = False
 SLEEP_TIMEOUT = 30.0  # Seconds of standby idle before turning off display panel & backlight
 
+import ipaddress
+
+LAST_CLIENT_IP = None
+CLIENT_NAME_CACHE = {}
+IP_TO_MAC_CACHE = {}
+MAC_TO_IPS_CACHE = {}
+CACHE_LOCK = threading.Lock()
+
+def normalize_ip(ip_str):
+    if not ip_str:
+        return None
+    raw = str(ip_str).split("%")[0].strip()
+    try:
+        return str(ipaddress.ip_address(raw))
+    except Exception:
+        return raw.lower()
+
+def decode_avahi_name(srv_name):
+    raw = bytearray()
+    i = 0
+    while i < len(srv_name):
+        if srv_name[i] == "\\" and i + 3 < len(srv_name) and srv_name[i+1:i+4].isdigit():
+            raw.append(int(srv_name[i+1:i+4], 10))
+            i += 4
+        else:
+            raw.extend(srv_name[i].encode("utf-8"))
+            i += 1
+    return raw.decode("utf-8", errors="replace").strip()
+
+def update_client_cache(key, name):
+    if not key or not name:
+        return
+    clean_k = normalize_ip(key) if (":" in str(key) and len(str(key)) > 17 or "." in str(key)) else str(key).strip().lower()
+    with CACHE_LOCK:
+        CLIENT_NAME_CACHE[clean_k] = name
+
+def get_cached_name(key):
+    if not key:
+        return None
+    clean_k = normalize_ip(key) if (":" in str(key) and len(str(key)) > 17 or "." in str(key)) else str(key).strip().lower()
+    with CACHE_LOCK:
+        return CLIENT_NAME_CACHE.get(clean_k)
+
+def discover_network_airplay_clients():
+    """
+    Scans mDNS _companion-link._tcp and _airplay._tcp plus ARP/NDP cache
+    to map Apple client device names to their IPs and MAC addresses.
+    """
+    try:
+        out = subprocess.check_output(["ip", "neigh"], text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            p = line.split()
+            if len(p) >= 5:
+                nip = normalize_ip(p[0])
+                nmac = p[4].lower()
+                if nip and nmac and ":" in nmac:
+                    with CACHE_LOCK:
+                        IP_TO_MAC_CACHE[nip] = nmac
+                        MAC_TO_IPS_CACHE.setdefault(nmac, set()).add(nip)
+                        cached_mac_name = CLIENT_NAME_CACHE.get(nmac)
+                        if cached_mac_name:
+                            CLIENT_NAME_CACHE[nip] = cached_mac_name
+    except Exception:
+        pass
+
+    for srv in ["_companion-link._tcp", "_airplay._tcp"]:
+        try:
+            cmd = ["avahi-browse", "-r", "-t", "-p", srv]
+            out = subprocess.check_output(cmd, text=True, stderr=subprocess.DEVNULL, timeout=2.5)
+            for line in out.splitlines():
+                fields = line.split(";")
+                if len(fields) >= 8 and fields[0] == "=":
+                    srv_name = decode_avahi_name(fields[3])
+                    srv_ip = normalize_ip(fields[7])
+                    if srv_ip and srv_name:
+                        with CACHE_LOCK:
+                            CLIENT_NAME_CACHE[srv_ip] = srv_name
+                            mac = IP_TO_MAC_CACHE.get(srv_ip)
+                            if mac:
+                                CLIENT_NAME_CACHE[mac] = srv_name
+                                for sib in MAC_TO_IPS_CACHE.get(mac, set()):
+                                    CLIENT_NAME_CACHE[sib] = srv_name
+                    if len(fields) >= 10:
+                        txt = fields[9]
+                        for item in txt.split():
+                            if "deviceid=" in item.lower():
+                                devid = item.split("=")[1].replace('"', '').strip().lower()
+                                with CACHE_LOCK:
+                                    CLIENT_NAME_CACHE[devid] = srv_name
+        except Exception:
+            pass
+
+def resolve_device_name(target_ip_str=None):
+    """
+    Resolves client IP (IPv4 or IPv6 link-local) to human-readable Apple device name.
+    Checks memory cache, ARP/NDP mappings, on-demand mDNS scan, and avahi-resolve.
+    """
+    global LAST_CLIENT_IP
+    if not target_ip_str:
+        target_ip_str = LAST_CLIENT_IP
+    if not target_ip_str:
+        return None
+
+    norm_ip = normalize_ip(target_ip_str)
+
+    # 1. Direct cache lookup by normalized IP
+    name = get_cached_name(norm_ip)
+    if name:
+        return name
+
+    # 2. Cache lookup via MAC address
+    with CACHE_LOCK:
+        mac = IP_TO_MAC_CACHE.get(norm_ip)
+        if mac:
+            name = CLIENT_NAME_CACHE.get(mac)
+            if name:
+                return name
+
+    # 3. On-demand network discovery
+    discover_network_airplay_clients()
+
+    # Check cache again post-discovery
+    name = get_cached_name(norm_ip)
+    if name:
+        return name
+
+    with CACHE_LOCK:
+        mac = IP_TO_MAC_CACHE.get(norm_ip)
+        if mac:
+            name = CLIENT_NAME_CACHE.get(mac)
+            if name:
+                return name
+
+    # 4. Fallback: avahi-resolve reverse lookup
+    try:
+        res = subprocess.check_output(["avahi-resolve", "-a", norm_ip], text=True, stderr=subprocess.DEVNULL, timeout=1.0).strip()
+        if res:
+            host = res.split()[-1].replace(".local", "").replace("-", " ").strip()
+            if host:
+                update_client_cache(norm_ip, host)
+                return host
+    except Exception:
+        pass
+
+    return None
+
+def periodic_client_discovery():
+    """Continuously refreshes Apple device name cache every 10 seconds."""
+    while True:
+        try:
+            discover_network_airplay_clients()
+        except Exception:
+            pass
+        time.sleep(10.0)
+
+threading.Thread(target=periodic_client_discovery, daemon=True).start()
+
 def wake_display(reason="Activity"):
     global LAST_ACTIVITY, MONITOR_ASLEEP
     LAST_ACTIVITY = time.time()
@@ -154,17 +311,67 @@ def monitor_uxplay_output(proc):
                 ):
                     wake_display(reason="Incoming AirPlay connection")
 
-                # 2. Track AirPlay PIN authentication requests and display OTP modal
-                m = re.search(r'CLIENT MUST NOW ENTER PIN = "(\d{4})"', line)
-                if m:
-                    pin_code = m.group(1)
-                    wake_display(reason=f"PIN OTP required: {pin_code}")
+                # Track client remote IP
+                m_remote = re.search(r'Remote:\s+([^\s]+)', line)
+                if m_remote:
+                    LAST_CLIENT_IP = m_remote.group(1).strip()
+
+                # Track client name from connection requests & registrations
+                m_req = re.search(r'connection request from (.+) \((.+)\) with deviceID = (.+)', line)
+                if m_req:
+                    c_name = m_req.group(1).strip()
+                    c_devid = m_req.group(3).strip()
+                    update_client_cache(c_devid, c_name)
+                    if LAST_CLIENT_IP:
+                        update_client_cache(LAST_CLIENT_IP, c_name)
+
+                m_reg = re.search(r'registered new client: (.+) DeviceID = (.+) PK =', line)
+                if m_reg:
+                    c_name = m_reg.group(1).strip()
+                    c_devid = m_reg.group(2).strip()
+                    update_client_cache(c_devid, c_name)
+                    if LAST_CLIENT_IP:
+                        update_client_cache(LAST_CLIENT_IP, c_name)
                     try:
-                        with open("/tmp/airplay_pin.txt", "w") as pf:
-                            pf.write(pin_code + "\n")
-                        print(f"[Kiosk] PIN Passcode generated: {pin_code}. Displaying OTP modal on screen.")
+                        if os.path.exists("/tmp/airplay_pin.txt"):
+                            os.remove("/tmp/airplay_pin.txt")
                     except Exception:
                         pass
+
+                # 2. Track AirPlay PIN authentication requests and display OTP modal
+                m = re.search(r'(?:\*\*\* CLIENT (?:\[(.*?)\] )?MUST NOW ENTER PIN = "(\d{4})")', line)
+                if m:
+                    client_ip_in_line = m.group(1)
+                    pin_code = m.group(2)
+                    ip_to_resolve = client_ip_in_line or LAST_CLIENT_IP
+                    wake_display(reason=f"PIN OTP required: {pin_code}")
+
+                    def _write_pin_file(pin, cname=None):
+                        try:
+                            with open("/tmp/airplay_pin.txt", "w") as pf:
+                                if cname:
+                                    pf.write(f"{pin}\n{cname}\n")
+                                else:
+                                    pf.write(f"{pin}\n")
+                        except Exception:
+                            pass
+
+                    dev_name = resolve_device_name(ip_to_resolve)
+                    _write_pin_file(pin_code, dev_name)
+                    print(f"[Kiosk] PIN Passcode generated: {pin_code} (Device: {dev_name}). Displaying OTP modal on screen.")
+
+                    if not dev_name:
+                        def _bg_resolve_pin(p_code, p_ip):
+                            for _ in range(6):
+                                time.sleep(0.5)
+                                if not os.path.exists("/tmp/airplay_pin.txt"):
+                                    break
+                                resolved = resolve_device_name(p_ip)
+                                if resolved:
+                                    _write_pin_file(p_code, resolved)
+                                    print(f"[Kiosk] Resolved client name asynchronously: '{resolved}'. Updated OTP modal.")
+                                    break
+                        threading.Thread(target=_bg_resolve_pin, args=(pin_code, ip_to_resolve), daemon=True).start()
                 elif "registered new client" in line:
                     try:
                         if os.path.exists("/tmp/airplay_pin.txt"):
@@ -182,12 +389,11 @@ def monitor_uxplay_output(proc):
                     on_stream_started()
                 elif (
                     "Destroying connection" in line
-                    or "exiting TCP thread" in line
                     or "running is no longer true" in line
                     or "video has finished" in line
                 ):
                     try:
-                        if os.path.exists("/tmp/airplay_pin.txt"):
+                        if CURRENT_LOCKED and os.path.exists("/tmp/airplay_pin.txt"):
                             os.remove("/tmp/airplay_pin.txt")
                     except Exception:
                         pass
@@ -528,6 +734,7 @@ def main():
     window_watcher()
     hotplug_and_network_watcher()
     threading.Thread(target=display_power_manager, daemon=True, name="DisplayPowerManager").start()
+    threading.Thread(target=discover_network_airplay_clients, daemon=True, name="InitialClientDiscovery").start()
 
     # Launch or close Wi-Fi GUI based on verified initial network state
     manage_wifi_gui()

@@ -331,14 +331,13 @@ class WifiKioskApp:
 
         try:
             font_title = ImageFont.truetype(FONT_DISPLAY_HEAVY, int(50 * scale))
-            font_label = ImageFont.truetype(FONT_TEXT_SEMI, int(17 * scale))
-            font_name  = ImageFont.truetype(FONT_DISPLAY_BOLD, int(21 * scale))
-            font_status= ImageFont.truetype(FONT_TEXT_SEMI, int(17 * scale))
+            font_label = ImageFont.truetype(FONT_TEXT_MED, int(17 * scale))
+            font_name  = ImageFont.truetype(FONT_TEXT_BOLD, int(17 * scale))
             font_inst1 = ImageFont.truetype(FONT_TEXT_MED, int(17 * scale))
             font_inst2 = ImageFont.truetype(FONT_TEXT_MED, int(16 * scale))
             font_hint  = ImageFont.truetype(FONT_TEXT_MED, int(12 * scale))
         except Exception:
-            font_title = font_label = font_name = font_status = font_inst1 = font_inst2 = font_hint = ImageFont.load_default()
+            font_title = font_label = font_name = font_inst1 = font_inst2 = font_hint = ImageFont.load_default()
 
         # AirPlay Icon
         try:
@@ -374,39 +373,28 @@ class WifiKioskApp:
         # Device Name Pill
         lbl_txt = "Tên thiết bị: "
         val_txt = self.monitor_name if self.monitor_name else "AirPlay Display"
-        b_lbl = draw.textbbox((0, 0), lbl_txt, font=font_label)
-        b_val = draw.textbbox((0, 0), val_txt, font=font_name)
-        pad_x, pad_y = int(26 * scale), int(13 * scale)
-        pill_w = (b_lbl[2] - b_lbl[0]) + (b_val[2] - b_val[0]) + pad_x * 2
-        pill_h = max(b_lbl[3] - b_lbl[1], b_val[3] - b_val[1]) + pad_y * 2
+        b_lbl = font_label.getbbox(lbl_txt)
+        b_val = font_name.getbbox(val_txt)
+        lbl_w = b_lbl[2] - b_lbl[0]
+        val_w = b_val[2] - b_val[0]
+        pad_x, pad_y = int(24 * scale), int(11 * scale)
+
+        # Exact baseline alignment calculation
+        try:
+            ascent_lbl, descent_lbl = font_label.getmetrics()
+            ascent_val, descent_val = font_name.getmetrics()
+        except Exception:
+            ascent_lbl, descent_lbl = int(14 * scale), int(4 * scale)
+            ascent_val, descent_val = int(14 * scale), int(4 * scale)
+
+        line_h = max(ascent_lbl + descent_lbl, ascent_val + descent_val)
+        pill_w = lbl_w + val_w + pad_x * 2
+        pill_h = line_h + pad_y * 2
+
+        gap_icon_title = int(22 * scale)
+        gap_title_pill = int(26 * scale)
 
         if has_network:
-            stat_color = "#30d158"
-            if self.net_type == "LAN":
-                if self.ip and self.ip != "127.0.0.1":
-                    stat_text = "● Đang kết nối mạng LAN"
-                else:
-                    stat_text = "● Đã cắm cáp LAN (Đang nhận IP...)"
-                net_text = ""
-            else:
-                net_label = f"Wi-Fi: {self.ssid}" if self.ssid else "Wi-Fi"
-                if self.ip and self.ip != "127.0.0.1":
-                    stat_text = f"● Đang kết nối {net_label}"
-                else:
-                    stat_text = f"● Đã kết nối {net_label} (Đang nhận IP...)"
-                net_text = ""
-            b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
-            stat_h = b_stat[3] - b_stat[1]
-
-            has_net_line = bool(net_text)
-            if has_net_line:
-                b_net = draw.textbbox((0, 0), net_text, font=font_status)
-                net_h = b_net[3] - b_net[1]
-                gap_stat_net = int(14 * scale)
-            else:
-                net_h = 0
-                gap_stat_net = 0
-
             inst1 = "Mở Trung tâm điều khiển trên iPhone, iPad hoặc Mac"
             inst2 = f"Chọn \"{val_txt}\" để kết nối"
             b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
@@ -427,53 +415,38 @@ class WifiKioskApp:
                 hint_h = 0
                 gap_hint = 0
 
-            total_h = (target_icon_h + int(22 * scale) + title_h + int(26 * scale) + pill_h +
-                       int(26 * scale) + stat_h + (gap_stat_net + net_h if has_net_line else 0) +
-                       int(26 * scale) + inst_h + (gap_hint + hint_h if has_hint else 0))
+            gap_pill_inst = int(32 * scale)
+            total_h = (target_icon_h + gap_icon_title + title_h + gap_title_pill + pill_h +
+                       gap_pill_inst + inst_h + (gap_hint + hint_h if has_hint else 0))
         else:
-            stat_text = "● Chưa có kết nối mạng"
-            stat_color = "#ff9f0a"
-            b_stat = draw.textbbox((0, 0), stat_text, font=font_status)
-            stat_h = b_stat[3] - b_stat[1]
-
             inst1 = "Vui lòng chọn mạng Wi-Fi ở khung bên trái."
             inst2 = "Dùng phím ↑ ↓ và Enter trên bàn phím để kết nối"
             b_i1 = draw.textbbox((0, 0), inst1, font=font_inst1)
             b_i2 = draw.textbbox((0, 0), inst2, font=font_inst2)
             inst_h = (b_i1[3] - b_i1[1]) + int(10 * scale) + (b_i2[3] - b_i2[1])
 
-            total_h = (target_icon_h + int(22 * scale) + title_h + int(26 * scale) + pill_h +
-                       int(26 * scale) + stat_h + int(26 * scale) + inst_h)
+            gap_pill_inst = int(28 * scale)
+            total_h = (target_icon_h + gap_icon_title + title_h + gap_title_pill + pill_h +
+                       gap_pill_inst + inst_h)
 
         current_y = (H - total_h) // 2
 
         # Draw Icon
         img.paste(icon_img, (center_x - target_icon_w // 2, current_y), icon_img)
-        current_y += target_icon_h + int(22 * scale)
+        current_y += target_icon_h + gap_icon_title
 
         # Draw Title
         draw.text((center_x - (b_title[2] - b_title[0]) // 2, current_y), t_title, fill="#ffffff", font=font_title)
-        current_y += title_h + int(26 * scale)
+        current_y += title_h + gap_title_pill
 
-        # Draw Device Name Pill
+        # Draw Device Name Pill (perfect baseline alignment)
         pill_x = center_x - pill_w // 2
         draw.rounded_rectangle([pill_x, current_y, pill_x + pill_w, current_y + pill_h],
                                radius=int(16 * scale), fill="#1c1c1e", outline="#3a3a3c", width=int(1.5 * scale))
-        draw.text((pill_x + pad_x, current_y + pad_y), lbl_txt, fill="#aeaeb2", font=font_label)
-        draw.text((pill_x + pad_x + (b_lbl[2] - b_lbl[0]), current_y + pad_y), val_txt, fill="#ffffff", font=font_name)
-        current_y += pill_h + int(26 * scale)
-
-        # Draw Status
-        draw.text((center_x - (b_stat[2] - b_stat[0]) // 2, current_y), stat_text, fill=stat_color, font=font_status)
-        current_y += stat_h
-
-        # Draw Network Info or Spacing
-        if has_network and has_net_line:
-            current_y += gap_stat_net
-            draw.text((center_x - (b_net[2] - b_net[0]) // 2, current_y), net_text, fill="#aeaeb2", font=font_status)
-            current_y += net_h + int(26 * scale)
-        else:
-            current_y += int(26 * scale)
+        baseline_y = current_y + pad_y + max(ascent_lbl, ascent_val)
+        draw.text((pill_x + pad_x, baseline_y), lbl_txt, fill="#aeaeb2", font=font_label, anchor="ls")
+        draw.text((pill_x + pad_x + lbl_w, baseline_y), val_txt, fill="#ffffff", font=font_name, anchor="ls")
+        current_y += pill_h + gap_pill_inst
 
         # Draw Instructions
         draw.text((center_x - (b_i1[2] - b_i1[0]) // 2, current_y), inst1, fill="#f5f5f7", font=font_inst1)
@@ -814,24 +787,25 @@ class WifiKioskApp:
         """
         Pre-renders the static background card and 11 digit boxes (0-9, •)
         at native screen resolution during initialization so runtime display is instantaneous (< 5ms).
+        Subtitle is rendered dynamically to gracefully display client device names.
         """
         scale = min(self.sw / 1920, self.sh / 1080)
         if scale < 0.8:
             scale = 0.8
 
-        # 1. Fullscreen dark backdrop (94% alpha for clean dimming without background bleed)
-        self.pin_modal_bg_img = Image.new("RGBA", (self.sw, self.sh), (8, 8, 10, int(255 * 0.94)))
+        # 1. Fullscreen dark backdrop (100% solid for completely clean focus without background bleed)
+        self.pin_modal_bg_img = Image.new("RGBA", (self.sw, self.sh), (8, 8, 10, 255))
         draw = ImageDraw.Draw(self.pin_modal_bg_img)
 
         # 2. Centered glassmorphic card dimensions
-        cw = int(620 * scale)
-        ch = int(410 * scale)
+        cw = int(720 * scale)
+        ch = int(380 * scale)
         cx = (self.sw - cw) // 2
         cy = (self.sh - ch) // 2
         radius = int(28 * scale)
 
         # 3. Ambient blue glow behind the card (authentic Apple TV lighting)
-        max_glow = int(360 * scale)
+        max_glow = int(380 * scale)
         glow_img = Image.new("RGBA", (max_glow * 2, max_glow * 2), (0, 0, 0, 0))
         glow_draw = ImageDraw.Draw(glow_img)
         for r in range(max_glow, 0, -4):
@@ -865,25 +839,27 @@ class WifiKioskApp:
 
         # 6. Typography
         try:
-            font_title = ImageFont.truetype(FONT_DISPLAY_BOLD, int(22 * scale))
-            font_sub = ImageFont.truetype(FONT_TEXT_REG, int(12 * scale))
+            font_title = ImageFont.truetype(FONT_DISPLAY_BOLD, int(24 * scale))
+            font_sub = ImageFont.truetype(FONT_TEXT_REG, int(13 * scale))
+            font_sub_bold = ImageFont.truetype(FONT_TEXT_SEMI, int(13 * scale))
             font_digit = ImageFont.truetype(FONT_DISPLAY_HEAVY, int(46 * scale))
-            font_foot = ImageFont.truetype(FONT_TEXT_SEMI, int(11 * scale))
         except Exception:
-            font_title = font_sub = font_digit = font_foot = ImageFont.load_default()
+            font_title = font_sub = font_sub_bold = font_digit = ImageFont.load_default()
+
+        self.font_pin_sub = font_sub
+        self.font_pin_sub_bold = font_sub_bold
+        self.pin_modal_scale = scale
+        self.pin_modal_cw = cw
 
         # Title: "Mật mã AirPlay"
         t_title = "Mật mã AirPlay"
         b_title = draw.textbbox((0, 0), t_title, font=font_title)
         draw.text(((self.sw - (b_title[2] - b_title[0])) // 2, curr_y), t_title, fill="#ffffff", font=font_title)
-        curr_y += (b_title[3] - b_title[1]) + int(8 * scale)
+        curr_y += (b_title[3] - b_title[1]) + int(10 * scale)
 
-        # Subtitle: "Nhập mã này trên thiết bị của bạn để kết nối với <monitor_name>"
-        dev_name = self.monitor_name if self.monitor_name else "AirPlay Display"
-        t_sub = f'Nhập mật mã này trên thiết bị của bạn để kết nối với "{dev_name}"'
-        b_sub = draw.textbbox((0, 0), t_sub, font=font_sub)
-        draw.text(((self.sw - (b_sub[2] - b_sub[0])) // 2, curr_y), t_sub, fill="#86868b", font=font_sub)
-        curr_y += (b_sub[3] - b_sub[1]) + int(26 * scale)
+        # Subtitle vertical slot (rendered dynamically per device)
+        self.pin_modal_sub_y = curr_y
+        curr_y += int(18 * scale) + int(24 * scale)
 
         # 7. Box dimensions and coordinates
         box_w = int(88 * scale)
@@ -905,13 +881,6 @@ class WifiKioskApp:
                 width=int(2 * scale)
             )
 
-        curr_y += box_h + int(24 * scale)
-
-        # Footer Badge: "✓ Thiết bị sẽ tự động được lưu vào danh sách tin cậy sau khi kết nối"
-        t_foot = "✓ Thiết bị sẽ tự động được lưu vào danh sách tin cậy sau khi kết nối"
-        b_foot = draw.textbbox((0, 0), t_foot, font=font_foot)
-        draw.text(((self.sw - (b_foot[2] - b_foot[0])) // 2, curr_y), t_foot, fill="#30d158", font=font_foot)
-
         # 8. Pre-render digit box patches (0-9 and bullet •)
         self.pin_digit_box_images = {}
         for ch in "0123456789•":
@@ -932,15 +901,60 @@ class WifiKioskApp:
             bdraw.text((dx, dy), ch, fill="#ffffff", font=font_digit)
             self.pin_digit_box_images[ch] = bimg
 
-    def _render_pin_modal_image(self, pin_str):
+    def _render_pin_modal_image(self, pin_str, client_name=None):
         """
-        Instantaneous PIN modal rendering (< 5ms) by pasting pre-rendered digit patches
-        onto pre-rendered background canvas with alpha masking.
+        Instantaneous PIN modal rendering (< 2ms) by dynamically stamping the device subtitle
+        and pasting pre-rendered digit patches onto pre-rendered background canvas.
         """
         if not hasattr(self, "pin_modal_bg_img") or not hasattr(self, "pin_digit_box_images"):
             self._init_pin_modal_cache()
 
         img = self.pin_modal_bg_img.copy()
+        draw = ImageDraw.Draw(img)
+        scale = getattr(self, "pin_modal_scale", 1.0)
+        cw = getattr(self, "pin_modal_cw", int(720 * scale))
+        sub_y = getattr(self, "pin_modal_sub_y", self.sh // 2 - int(100 * scale))
+        font_sub = getattr(self, "font_pin_sub", ImageFont.load_default())
+        font_sub_bold = getattr(self, "font_pin_sub_bold", ImageFont.load_default())
+
+        dev_name = self.monitor_name if self.monitor_name else "AirPlay Display"
+
+        if client_name and not client_name.startswith("IP:"):
+            seg1 = "Nhập mật mã này trên "
+            seg2 = f"“{client_name}”"
+            seg3 = " để kết nối với "
+            seg4 = f"“{dev_name}”"
+            w1 = draw.textbbox((0, 0), seg1, font=font_sub)[2]
+            w2 = draw.textbbox((0, 0), seg2, font=font_sub_bold)[2]
+            w3 = draw.textbbox((0, 0), seg3, font=font_sub)[2]
+            w4 = draw.textbbox((0, 0), seg4, font=font_sub_bold)[2]
+            total_w = w1 + w2 + w3 + w4
+
+            if total_w <= cw - int(40 * scale):
+                start_x = (self.sw - total_w) // 2
+                draw.text((start_x, sub_y), seg1, fill="#86868b", font=font_sub)
+                draw.text((start_x + w1, sub_y), seg2, fill="#ffffff", font=font_sub_bold)
+                draw.text((start_x + w1 + w2, sub_y), seg3, fill="#86868b", font=font_sub)
+                draw.text((start_x + w1 + w2 + w3, sub_y), seg4, fill="#ffffff", font=font_sub_bold)
+            else:
+                line1_w = w1 + w2
+                w_conn = draw.textbbox((0, 0), "để kết nối với ", font=font_sub)[2]
+                line2_w = w_conn + w4
+                start_x1 = (self.sw - line1_w) // 2
+                draw.text((start_x1, sub_y - int(5 * scale)), seg1, fill="#86868b", font=font_sub)
+                draw.text((start_x1 + w1, sub_y - int(5 * scale)), seg2, fill="#ffffff", font=font_sub_bold)
+                start_x2 = (self.sw - line2_w) // 2
+                draw.text((start_x2, sub_y + int(15 * scale)), "để kết nối với ", fill="#86868b", font=font_sub)
+                draw.text((start_x2 + w_conn, sub_y + int(15 * scale)), seg4, fill="#ffffff", font=font_sub_bold)
+        else:
+            seg1 = "Nhập mật mã này trên thiết bị của bạn để kết nối với "
+            seg2 = f"“{dev_name}”"
+            w1 = draw.textbbox((0, 0), seg1, font=font_sub)[2]
+            w2 = draw.textbbox((0, 0), seg2, font=font_sub_bold)[2]
+            start_x = (self.sw - (w1 + w2)) // 2
+            draw.text((start_x, sub_y), seg1, fill="#86868b", font=font_sub)
+            draw.text((start_x + w1, sub_y), seg2, fill="#ffffff", font=font_sub_bold)
+
         digits = list(str(pin_str).strip()[:4].ljust(4, "•"))
         for idx, d in enumerate(digits):
             patch = self.pin_digit_box_images.get(d, self.pin_digit_box_images.get("•"))
@@ -949,10 +963,11 @@ class WifiKioskApp:
 
         return ImageTk.PhotoImage(img)
 
-    def _show_pin_modal(self, pin_str):
-        print(f"[WifiKiosk] >>> DISPLAYING PIN MODAL: {pin_str} <<<", flush=True)
+    def _show_pin_modal(self, pin_str, client_name=None):
+        print(f"[WifiKiosk] >>> DISPLAYING PIN MODAL: {pin_str} (Device: {client_name}) <<<", flush=True)
         self._current_displayed_pin = pin_str
-        self.pin_modal_photo = self._render_pin_modal_image(pin_str)
+        self._current_displayed_client = client_name
+        self.pin_modal_photo = self._render_pin_modal_image(pin_str, client_name)
         if self.pin_modal_item is not None:
             self.canvas_root.delete(self.pin_modal_item)
         self.pin_modal_item = self.canvas_root.create_image(
@@ -974,6 +989,7 @@ class WifiKioskApp:
             self.pin_modal_item = None
             self.pin_modal_photo = None
             self._current_displayed_pin = None
+            self._current_displayed_client = None
 
     def _pin_check_loop(self):
         try:
@@ -988,10 +1004,13 @@ class WifiKioskApp:
                     self._hide_pin_modal()
                 else:
                     with open(pin_file, "r") as f:
-                        pin = f.read().strip()
+                        lines = [l.strip() for l in f.readlines() if l.strip()]
+                    pin = lines[0] if lines else ""
+                    client_name = lines[1] if len(lines) > 1 else None
                     if len(pin) == 4 and pin.isdigit():
-                        if getattr(self, "_current_displayed_pin", None) != pin:
-                            self._show_pin_modal(pin)
+                        if (getattr(self, "_current_displayed_pin", None) != pin or
+                            getattr(self, "_current_displayed_client", None) != client_name):
+                            self._show_pin_modal(pin, client_name)
                     else:
                         self._hide_pin_modal()
             else:
