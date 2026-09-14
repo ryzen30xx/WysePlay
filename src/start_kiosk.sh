@@ -23,8 +23,14 @@ sudo sysctl -w net.ipv4.tcp_low_latency=1 2>/dev/null || true
 sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384 2>/dev/null || true
 
 # Disable Wi-Fi power saving so latency stays constant and NTP/UDP packets aren't dropped
+export PATH=$PATH:/sbin:/usr/sbin
 sudo iw dev wlan0 set power_save off 2>/dev/null || true
 sudo iwconfig wlan0 power off 2>/dev/null || true
+
+# Prevent CPU frequency dropping below 1.0 GHz (prevents SDIO missed interrupts on XR819 Wi-Fi)
+for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_min_freq; do
+    echo 1008000 | sudo tee "$f" >/dev/null 2>&1 || true
+done
 
 # Ensure multicast route exists on active interface so mDNS announcements reach all AirPlay clients
 DEF_IFACE=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
