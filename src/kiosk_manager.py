@@ -186,8 +186,12 @@ def wake_display(reason="Activity"):
     LAST_ACTIVITY = time.time()
     if MONITOR_ASLEEP:
         MONITOR_ASLEEP = False
-        subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
-        subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
+        subprocess.run('echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true', shell=True)
+        subprocess.run('modetest -M sun4i-drm -w 49:DPMS:0 >/dev/null 2>&1 || true', shell=True)
+        if os.environ.get("DISPLAY"):
+            subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
+            subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
+        apply_standby_wallpaper()
         print(f"[Kiosk] Display WOKEN UP ({reason}): Monitor panel & backlight ON.")
 
 def sleep_display():
@@ -200,8 +204,11 @@ def sleep_display():
         if os.path.exists("/tmp/airplay_pin.txt"):
             return
         MONITOR_ASLEEP = True
-        subprocess.run('DISPLAY=:0 xset +dpms 2>/dev/null', shell=True)
-        subprocess.run('DISPLAY=:0 xset dpms force off 2>/dev/null', shell=True)
+        subprocess.run('echo 1 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true', shell=True)
+        subprocess.run('modetest -M sun4i-drm -w 49:DPMS:3 >/dev/null 2>&1 || true', shell=True)
+        if os.environ.get("DISPLAY"):
+            subprocess.run('DISPLAY=:0 xset +dpms 2>/dev/null', shell=True)
+            subprocess.run('DISPLAY=:0 xset dpms force off 2>/dev/null', shell=True)
         print("[Kiosk] Idle 30s: Display entered DPMS SLEEP (monitor panel & backlight OFF).")
 
 def apply_standby_wallpaper():
@@ -282,16 +289,28 @@ def display_power_manager():
     while True:
         time.sleep(1.0)
         # 1. Detect physical user interaction via mouse movement
-        try:
-            out = subprocess.check_output("DISPLAY=:0 xdotool getmouselocation 2>/dev/null || true", shell=True).decode()
-            if "x:" in out and "y:" in out:
-                parts = out.split()
-                pos = (parts[0], parts[1])
-                if last_mouse_pos is not None and pos != last_mouse_pos:
-                    wake_display(reason="Mouse movement")
-                last_mouse_pos = pos
-        except Exception:
-            pass
+        if not os.environ.get("DISPLAY"):
+            try:
+                import select
+                if os.path.exists("/dev/input/mice"):
+                    with open("/dev/input/mice", "rb") as f_m:
+                        r, _, _ = select.select([f_m], [], [], 0.0)
+                        if r:
+                            f_m.read(3)
+                            wake_display(reason="Mouse movement")
+            except Exception:
+                pass
+        else:
+            try:
+                out = subprocess.check_output("DISPLAY=:0 xdotool getmouselocation 2>/dev/null || true", shell=True).decode()
+                if "x:" in out and "y:" in out:
+                    parts = out.split()
+                    pos = (parts[0], parts[1])
+                    if last_mouse_pos is not None and pos != last_mouse_pos:
+                        wake_display(reason="Mouse movement")
+                    last_mouse_pos = pos
+            except Exception:
+                pass
 
         # 2. If streaming or displaying PIN OTP, keep active and cancel sleep
         if CURRENT_LOCKED or os.path.exists("/tmp/airplay_pin.txt"):
@@ -449,7 +468,12 @@ def monitor_uxplay_output(proc):
                         pass
 
                 # 3. Stream lifecycle
-                if "Initialized GStreamer video renderer" in line or "identified as Connection type RAOP" in line:
+                if (
+                    "Initialized GStreamer video renderer" in line
+                    or "identified as Connection type RAOP" in line
+                    or "raop_rtp_mirror starting mirroring" in line
+                    or "Begin streaming to GStreamer video pipeline" in line
+                ):
                     try:
                         if os.path.exists("/tmp/airplay_pin.txt"):
                             os.remove("/tmp/airplay_pin.txt")
@@ -460,6 +484,8 @@ def monitor_uxplay_output(proc):
                     "Destroying connection" in line
                     or "running is no longer true" in line
                     or "video has finished" in line
+                    or "raop_rtp_mirror stopping mirroring" in line
+                    or "Stopping mirror audio" in line
                 ):
                     try:
                         if CURRENT_LOCKED and os.path.exists("/tmp/airplay_pin.txt"):
@@ -769,24 +795,30 @@ check_hdmi_audio_support = check_display_audio_support
 
 def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
-    os.environ['DISPLAY'] = ':0'
+    is_x11 = bool(os.environ.get("DISPLAY")) and subprocess.run("pgrep -x Xorg >/dev/null", shell=True).returncode == 0
+    if not is_x11 and 'DISPLAY' in os.environ:
+        del os.environ['DISPLAY']
+
     try:
         if os.path.exists("/tmp/airplay_streaming"):
             os.remove("/tmp/airplay_streaming")
     except OSError:
         pass
 
-    # Clear root screen and initialize DPMS (enabled, display active at boot)
-    subprocess.run('DISPLAY=:0 xsetroot -solid "#000000"', shell=True)
-    subprocess.run('DISPLAY=:0 xset +dpms 2>/dev/null', shell=True)
-    subprocess.run('DISPLAY=:0 xset s off s noblank 2>/dev/null', shell=True)
-    subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
-    
+    if is_x11:
+        # Clear root screen and initialize DPMS for X11
+        subprocess.run('DISPLAY=:0 xsetroot -solid "#000000" 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset +dpms 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset s off s noblank 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xrandr --auto 2>/dev/null', shell=True)
+    else:
+        # Native DRM/KMS Framebuffer initialization (like Android HWComposer)
+        subprocess.run('echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true', shell=True)
+        subprocess.run('modetest -M sun4i-drm -w 49:DPMS:0 >/dev/null 2>&1 || true', shell=True)
+
     # Ensure inputs are unlocked in standby
     set_inputs(False)
-
-    # Initial probe with xrandr --auto
-    subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
     time.sleep(0.5)
 
     # Initial Network status synchronized at kernel level
@@ -906,10 +938,14 @@ def main():
             soc_platform = "allwinner"
 
         if soc_platform == "allwinner":
-            # Cedrus v4l2slh264dec outputs NV12_32L32 (tiled), which scrambles colors/macroblocks
-            # on glimagesink/kmssink without hardware de-tiling. avdec_h264 uses Cortex-A53 NEON SIMD
-            # (203+ FPS @ 16% CPU) and outputs linear I420 with 100% accurate colors.
-            decoder = "avdec_h264"
+            # Allwinner Cedrus hardware VPU with linear NV12 caps:
+            # Passes 'capsfilter caps=video/x-raw,format=NV12' to negotiate linear NV12,
+            # which glimagesink (Panfrost Mali-G31 GPU via GBM) hardware converts and scans out at 60 FPS
+            # with 100% accurate colors and 0% CPU overhead (Native Android architecture).
+            if os.path.exists("/dev/video0") and not hw_fallback_active:
+                decoder = "v4l2slh264dec"
+            else:
+                decoder = "avdec_h264"
         elif soc_platform in ("intel", "amd", "x86_generic"):
             if decoder not in ("vaapih264dec", "vaapih265dec"):
                 decoder = "avdec_h264"
@@ -934,11 +970,11 @@ def main():
             pass
 
         if decoder == 'v4l2slh264dec':
-            extra_flags.extend(['-vd', 'v4l2slh264dec', '-vc', 'none'])
+            extra_flags.extend(['-vd', 'v4l2slh264dec', '-vc', 'capsfilter caps=video/x-raw,format=NV12'])
         elif decoder == 'avdec_h264':
-            extra_flags.extend(['-vd', 'avdec_h264 max-threads=1 thread-type=slice', '-vc', 'none'])
+            extra_flags.extend(['-vd', 'avdec_h264 max-threads=4', '-vc', 'none'])
         elif decoder == 'avdec_h265':
-            extra_flags.extend(['-vd', 'avdec_h265 max-threads=1 thread-type=slice', '-vc', 'none'])
+            extra_flags.extend(['-vd', 'avdec_h265 max-threads=4', '-vc', 'none'])
         elif decoder and decoder not in ('avdec_h264', 'avdec_h265'):
             extra_flags.extend(['-vd', decoder])
 

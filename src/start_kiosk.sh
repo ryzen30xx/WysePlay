@@ -1,8 +1,13 @@
 #!/bin/bash
-export DISPLAY=:0
+# Native Direct Hardware Rendering Architecture (Android SurfaceFlinger / HWComposer model)
+# Zero X11/Xorg overhead, pure Linux DRM/KMS + Panfrost Mali-G31 GPU EGL/GBM direct scanout
+unset DISPLAY
+export GST_GL_PLATFORM=egl
+export GST_GL_WINDOW=gbm
 
-# Ensure framebuffer is unblanked at startup
+# Ensure framebuffer and DRM display engine are unblanked and active at startup
 echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true
+modetest -M sun4i-drm -w 49:DPMS:0 >/dev/null 2>&1 || true
 
 # Optimize network buffers & Wi-Fi bottom-half thread priority for zero-latency streaming
 sudo sysctl -w net.core.rmem_max=16777216 2>/dev/null || true
@@ -57,4 +62,4 @@ if [ -n "$DISPLAY" ]; then
 fi
 
 # Run Kiosk Manager in native DRM or X11 mode
-exec python3 /opt/airplay/kiosk_manager.py
+exec python3 -u /opt/airplay/kiosk_manager.py 2>&1 | tee -a /tmp/kiosk.log
