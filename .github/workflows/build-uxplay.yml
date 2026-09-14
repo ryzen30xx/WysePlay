@@ -5,12 +5,14 @@ on:
     branches:
       - main
     paths:
+      - 'uxplay/**'
       - 'patches/**'
       - '.github/workflows/build-uxplay.yml'
     tags:
       - 'v*'
   pull_request:
     paths:
+      - 'uxplay/**'
       - 'patches/**'
       - '.github/workflows/build-uxplay.yml'
   workflow_dispatch:
@@ -65,12 +67,8 @@ jobs:
                 libssl-dev libplist-dev libavahi-compat-libdnssd-dev \
                 libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libx11-dev
               
-              rm -rf /tmp/uxplay-build
-              git clone https://github.com/FDH2/UxPlay.git /tmp/uxplay-build
-              cd /tmp/uxplay-build
-              git checkout a67e08f6d58e5e1078abb350103e6c6baff67e7e
-              git apply /workspace/patches/uxplay_customizations.patch
-              mkdir -p build && cd build
+              cd /workspace/uxplay
+              rm -rf build && mkdir -p build && cd build
               cmake .. -DCMAKE_BUILD_TYPE=Release
               make -j\$(nproc)
               strip uxplay

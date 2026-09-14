@@ -33,6 +33,27 @@ def get_display_info():
     except Exception:
         pass
 
+    # 1b. If xrandr failed (pure DRM/console mode without X11), query DRM/framebuffer directly
+    if res == "1280x800":
+        try:
+            for mode_file in glob.glob("/sys/class/drm/card*-*/modes"):
+                status_file = os.path.join(os.path.dirname(mode_file), "status")
+                if os.path.exists(status_file):
+                    with open(status_file) as sf:
+                        if sf.read().strip() == "connected":
+                            with open(mode_file) as mf:
+                                first_mode = mf.readline().strip()
+                                if 'x' in first_mode:
+                                    res = first_mode.replace('i', '')
+                                    break
+            if res == "1280x800" and os.path.exists("/sys/class/graphics/fb0/virtual_size"):
+                with open("/sys/class/graphics/fb0/virtual_size") as vsf:
+                    vp = vsf.read().strip().split(",")
+                    if len(vp) == 2 and int(vp[0]) > 0:
+                        res = f"{vp[0]}x{vp[1]}"
+        except Exception:
+            pass
+
     # 2. Get monitor name from sysfs drm edid
     try:
         connectors = glob.glob("/sys/class/drm/card*-*")
@@ -498,6 +519,24 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
         out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
     out_file = os.path.join(out_dir, 'standby.png')
     final_img.save(out_file)
+
+    # Directly blit to Linux DRM framebuffer (/dev/fb0) if available
+    try:
+        if os.path.exists("/dev/fb0"):
+            fb_w, fb_h = target_w, target_h
+            try:
+                with open("/sys/class/graphics/fb0/virtual_size", "r") as vsf:
+                    vp = vsf.read().strip().split(",")
+                    fb_w, fb_h = int(vp[0]), int(vp[1])
+            except Exception:
+                pass
+            fb_img = final_img if final_img.size == (fb_w, fb_h) else final_img.resize((fb_w, fb_h), Image.Resampling.BILINEAR)
+            raw_bgrx = fb_img.convert("RGB").tobytes("raw", "BGRX")
+            with open("/dev/fb0", "wb") as fbf:
+                fbf.write(raw_bgrx)
+    except Exception:
+        pass
+
     layout_mode = "Shifted-Right (Wi-Fi Modal Active)" if wifi_gui_showing else "Centered"
     print(f"Wallpaper saved: {out_file} (Monitor: {monitor_name}, Net: {net_type}, Layout: {layout_mode}, Res: {res})")
     return monitor_name, res, rate

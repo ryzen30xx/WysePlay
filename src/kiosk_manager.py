@@ -204,6 +204,73 @@ def sleep_display():
         subprocess.run('DISPLAY=:0 xset dpms force off 2>/dev/null', shell=True)
         print("[Kiosk] Idle 30s: Display entered DPMS SLEEP (monitor panel & backlight OFF).")
 
+def apply_standby_wallpaper():
+    try:
+        if os.path.exists("/dev/fb0"):
+            from PIL import Image
+            base_p = "/opt/airplay/standby.png"
+            if os.path.exists(base_p):
+                img = Image.open(base_p).convert("RGB")
+                fb_w, fb_h = 1920, 1080
+                try:
+                    with open("/sys/class/graphics/fb0/virtual_size", "r") as vsf:
+                        vp = vsf.read().strip().split(",")
+                        fb_w, fb_h = int(vp[0]), int(vp[1])
+                except Exception:
+                    pass
+                if img.size != (fb_w, fb_h):
+                    img = img.resize((fb_w, fb_h), Image.Resampling.BILINEAR)
+                raw = img.tobytes("raw", "BGRX")
+                with open("/dev/fb0", "wb") as fb:
+                    fb.write(raw)
+    except Exception as e:
+        print(f"[Kiosk] Error applying fb0 wallpaper: {e}", flush=True)
+    if os.environ.get("DISPLAY"):
+        subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+
+def render_pin_modal_fb0(pin, client_name=None):
+    if not os.path.exists("/dev/fb0"):
+        return
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        base_path = "/opt/airplay/standby.png"
+        if os.path.exists(base_path):
+            img = Image.open(base_path).convert("RGBA")
+        else:
+            img = Image.new("RGBA", (1920, 1080), (10, 10, 12, 255))
+        overlay = Image.new("RGBA", img.size, (0, 0, 0, 190))
+        img = Image.alpha_composite(img, overlay)
+        draw = ImageDraw.Draw(img)
+
+        w, h = img.size
+        card_w, card_h = int(w * 0.45), int(h * 0.42)
+        cx, cy = w // 2, h // 2
+        card_box = [cx - card_w // 2, cy - card_h // 2, cx + card_w // 2, cy + card_h // 2]
+        draw.rounded_rectangle(card_box, radius=24, fill=(28, 28, 30, 245), outline=(68, 68, 70), width=2)
+
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if not os.path.exists(font_path):
+            font_path = "/opt/airplay/fonts/SF-Pro-Display-Bold.otf"
+        if not os.path.exists(font_path):
+            font_path = None
+        try:
+            f_title = ImageFont.truetype(font_path, int(h * 0.035)) if font_path else ImageFont.load_default()
+            f_pin = ImageFont.truetype(font_path, int(h * 0.11)) if font_path else ImageFont.load_default()
+            f_sub = ImageFont.truetype(font_path, int(h * 0.024)) if font_path else ImageFont.load_default()
+        except Exception:
+            f_title = f_pin = f_sub = ImageFont.load_default()
+
+        draw.text((cx, cy - card_h // 2 + int(card_h * 0.20)), "Mã xác thực AirPlay (PIN)", fill="#FFFFFF", font=f_title, anchor="mm")
+        draw.text((cx, cy + int(card_h * 0.02)), "  ".join(str(pin)), fill="#34C759", font=f_pin, anchor="mm")
+        sub_text = f"Thiết bị: {client_name}" if client_name else "Nhập mã số này trên thiết bị Apple của bạn"
+        draw.text((cx, cy + card_h // 2 - int(card_h * 0.20)), sub_text, fill="#8E8E93", font=f_sub, anchor="mm")
+
+        raw = img.convert("RGB").tobytes("raw", "BGRX")
+        with open("/dev/fb0", "wb") as fb:
+            fb.write(raw)
+    except Exception as e:
+        print(f"[Kiosk] Error rendering PIN modal to fb0: {e}", flush=True)
+
 def display_power_manager():
     """
     Monitors system inactivity, mouse movement, and streaming state.
@@ -355,6 +422,7 @@ def monitor_uxplay_output(proc):
                                     pf.write(f"{pin}\n")
                         except Exception:
                             pass
+                        render_pin_modal_fb0(pin, cname)
 
                     dev_name = resolve_device_name(ip_to_resolve)
                     _write_pin_file(pin_code, dev_name)
@@ -376,6 +444,7 @@ def monitor_uxplay_output(proc):
                     try:
                         if os.path.exists("/tmp/airplay_pin.txt"):
                             os.remove("/tmp/airplay_pin.txt")
+                            apply_standby_wallpaper()
                     except Exception:
                         pass
 
@@ -399,6 +468,7 @@ def monitor_uxplay_output(proc):
                         pass
                     if CURRENT_LOCKED:
                         on_stream_ended()
+                        apply_standby_wallpaper()
                     # Keep UxPlay running as a permanent daemon across sessions:
                     # Do not kill UxPlay on disconnect, preventing mDNS flapping and device disappearance on client devices.
     except Exception as e:
@@ -406,6 +476,8 @@ def monitor_uxplay_output(proc):
 
 def manage_wifi_gui():
     global WIFI_GUI_PROC
+    if not os.environ.get("DISPLAY"):
+        return
     with STATE_LOCK:
         if WIFI_GUI_PROC is None or WIFI_GUI_PROC.poll() is not None:
             print("[Kiosk] Launching/ensuring unified Standby & Wi-Fi Kiosk UI...")
@@ -728,7 +800,7 @@ def main():
     )
     has_audio_init, _ = check_hdmi_audio_support()
     CURRENT_DISPLAY = (monitor_name, res, rate, has_audio_init)
-    subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+    apply_standby_wallpaper()
 
     # Start background watcher threads
     window_watcher()
@@ -758,7 +830,7 @@ def main():
         CURRENT_DISPLAY = (monitor_name, res, rate, has_audio)
 
         # Apply wallpaper
-        subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+        apply_standby_wallpaper()
 
         # 2. UxPlay streaming parameters are STRICTLY determined by hardware benchmark profile
         # (Independent of the connected display, preventing downgraded performance from inferior setup monitors)
@@ -769,17 +841,21 @@ def main():
         decoder = "avdec_h264"
         video_sink = "autovideosink"
 
-        if profile and "selected_profile" in profile:
+        # Check if running in Linux DRM/KMS mode without X11
+        is_drm_mode = (not os.environ.get("DISPLAY")) or (os.path.exists("/dev/dri/card0") and subprocess.run("pgrep -x Xorg >/dev/null", shell=True).returncode != 0)
+
+        if is_drm_mode:
+            video_sink = "kmssink"
+            decoder = "v4l2slh264dec"
+            print(f"[Kiosk] Direct DRM/KMS mode active: VideoSink={video_sink}, Decoder={decoder}")
+        elif profile and "selected_profile" in profile:
             sp = profile["selected_profile"]
             target_res = sp.get("resolution", "1920x1080")
             target_fps = sp.get("max_fps", 60)
             target_h265 = sp.get("h265", False)
-            # Use avdec_h264 (NEON ARM assembly, 203.9 FPS @ 16% CPU) to prevent NV12_4L4 software de-tiling
             decoder = profile.get("decoder", "avdec_h264")
-            if decoder == "v4l2slh264dec":
-                decoder = "avdec_h264"
             raw_sink = profile.get("video_sink", "autovideosink")
-            if raw_sink in ("ximagesink", "kmssink", "", None):
+            if raw_sink in ("ximagesink", "", None):
                 video_sink = "xvimagesink" if shutil.which("xvinfo") else "autovideosink"
             else:
                 video_sink = raw_sink
@@ -904,7 +980,6 @@ def main():
             '-nh',
             '-n', monitor_name,
             '-nohold',
-            '-fs',
             '-p',
             '-s', f'{target_res}@{stream_fps}',
             '-fps', str(stream_fps),
@@ -913,7 +988,10 @@ def main():
             '-vsync', 'no',
             '-FPSdata',
             '-vs', video_sink
-        ] + extra_flags
+        ]
+        if video_sink != "kmssink":
+            cmd.append('-fs')
+        cmd.extend(extra_flags)
 
         print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p, smooth clock-synced)...")
         with open("/tmp/uxplay.log", "a") as ux_log:

@@ -394,23 +394,35 @@ build_and_install_custom_uxplay() {
     )
     apt-get install -y --no-install-recommends "${BUILD_DEPS[@]}"
 
-    UXPLAY_BUILD_DIR=$(mktemp -d /tmp/uxplay_build_XXXXXX)
-    log_info "Tải mã nguồn UxPlay v1.71 và áp dụng bản vá tính năng chung..."
-    git clone https://github.com/FDH2/UxPlay.git "${UXPLAY_BUILD_DIR}"
-    (
-        cd "${UXPLAY_BUILD_DIR}"
-        git checkout a67e08f6d58e5e1078abb350103e6c6baff67e7e
-        if [[ -f "${SOURCE_DIR}/patches/uxplay_customizations.patch" ]]; then
-            log_info "Áp dụng bản vá: patches/uxplay_customizations.patch"
-            git apply "${SOURCE_DIR}/patches/uxplay_customizations.patch"
-        fi
-        mkdir -p build && cd build
-        cmake .. -DCMAKE_BUILD_TYPE=Release
-        make -j$(nproc 2>/dev/null || echo 2)
-        systemctl stop airplay-kiosk.service 2>/dev/null || true
-        make install
-    )
-    rm -rf "${UXPLAY_BUILD_DIR}"
+    if [[ -d "${SOURCE_DIR}/uxplay" ]]; then
+        log_info "Biên dịch trực tiếp từ thư mục mã nguồn uxplay/ trong kho lưu trữ..."
+        (
+            cd "${SOURCE_DIR}/uxplay"
+            rm -rf build && mkdir -p build && cd build
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+            make -j$(nproc 2>/dev/null || echo 2)
+            systemctl stop airplay-kiosk.service 2>/dev/null || true
+            make install
+        )
+    else
+        UXPLAY_BUILD_DIR=$(mktemp -d /tmp/uxplay_build_XXXXXX)
+        log_info "Tải mã nguồn UxPlay v1.71 và áp dụng bản vá tính năng chung..."
+        git clone https://github.com/FDH2/UxPlay.git "${UXPLAY_BUILD_DIR}"
+        (
+            cd "${UXPLAY_BUILD_DIR}"
+            git checkout a67e08f6d58e5e1078abb350103e6c6baff67e7e
+            if [[ -f "${SOURCE_DIR}/patches/uxplay_customizations.patch" ]]; then
+                log_info "Áp dụng bản vá: patches/uxplay_customizations.patch"
+                git apply "${SOURCE_DIR}/patches/uxplay_customizations.patch"
+            fi
+            mkdir -p build && cd build
+            cmake .. -DCMAKE_BUILD_TYPE=Release
+            make -j$(nproc 2>/dev/null || echo 2)
+            systemctl stop airplay-kiosk.service 2>/dev/null || true
+            make install
+        )
+        rm -rf "${UXPLAY_BUILD_DIR}"
+    fi
 
     mkdir -p /opt/airplay
     if [[ -n "$current_patch_hash" ]]; then

@@ -1,17 +1,7 @@
 #!/bin/bash
-export DISPLAY=:0
 
-# Load Xresources if available
-if [ -f "$HOME/.Xresources" ]; then
-    xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
-fi
-
-# Enable DPMS power management so monitor can sleep
-xset +dpms 2>/dev/null || true
-xset s off 2>/dev/null || true
-xset s 0 0 2>/dev/null || true
-xset s noblank 2>/dev/null || true
-xset dpms force on 2>/dev/null || true
+# Ensure framebuffer is unblanked at startup
+echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true
 
 # Optimize network buffers & Wi-Fi bottom-half thread priority for zero-latency streaming
 sudo sysctl -w net.core.rmem_max=16777216 2>/dev/null || true
@@ -47,14 +37,23 @@ if [ -n "$PID_XRADIO" ]; then
     sudo renice -20 -p $PID_XRADIO 2>/dev/null || true
 fi
 
-# 1. Start clean Openbox in background
-OPENBOX_RC="${XDG_CONFIG_HOME:-$HOME/.config}/openbox/rc.xml"
-if [ -f "$OPENBOX_RC" ]; then
-    openbox --config-file "$OPENBOX_RC" &
-else
-    openbox &
+# If X11 DISPLAY is present (legacy X11 setup), start Openbox
+if [ -n "$DISPLAY" ]; then
+    if [ -f "$HOME/.Xresources" ]; then
+        xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
+    fi
+    xset +dpms 2>/dev/null || true
+    xset s off 2>/dev/null || true
+    xset s 0 0 2>/dev/null || true
+    xset s noblank 2>/dev/null || true
+    xset dpms force on 2>/dev/null || true
+    OPENBOX_RC="${XDG_CONFIG_HOME:-$HOME/.config}/openbox/rc.xml"
+    if [ -f "$OPENBOX_RC" ]; then
+        openbox --config-file "$OPENBOX_RC" &
+    else
+        openbox &
+    fi
 fi
 
-# 2. Run Kiosk Manager
+# Run Kiosk Manager in native DRM or X11 mode
 exec python3 /opt/airplay/kiosk_manager.py
-
