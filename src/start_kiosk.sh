@@ -1,4 +1,5 @@
 #!/bin/bash
+export DISPLAY=:0
 
 # Ensure framebuffer is unblanked at startup
 echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true

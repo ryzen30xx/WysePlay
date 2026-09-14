@@ -13,7 +13,7 @@ Environment=HOME=@TARGET_HOME@ PYTHONUNBUFFERED=1
 StandardOutput=journal
 StandardError=journal
 ExecStartPre=/bin/sh -c "systemctl stop getty@tty1.service || true"
-ExecStart=/opt/airplay/start_kiosk.sh
+ExecStart=/usr/bin/xinit /opt/airplay/start_kiosk.sh -- :0 vt1 -nocursor
 Restart=always
 RestartSec=3
 TimeoutStopSec=5
