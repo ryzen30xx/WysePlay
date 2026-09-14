@@ -845,7 +845,10 @@ def main():
         is_drm_mode = (not os.environ.get("DISPLAY")) or (os.path.exists("/dev/dri/card0") and subprocess.run("pgrep -x Xorg >/dev/null", shell=True).returncode != 0)
 
         if is_drm_mode:
-            video_sink = "kmssink"
+            # Note: Allwinner sun4i-drm planes only support RGB formats. Passing kmssink directly
+            # causes negotiation failure ('Unsupported pixel format') with v4l2slh264dec (NV12_32L32).
+            # glimagesink with Panfrost Mali GPU uses GBM/EGL to hardware upload and convert NV12 at 60 FPS.
+            video_sink = "glimagesink"
             decoder = "v4l2slh264dec"
             print(f"[Kiosk] Direct DRM/KMS mode active: VideoSink={video_sink}, Decoder={decoder}")
         elif profile and "selected_profile" in profile:
@@ -903,7 +906,10 @@ def main():
             soc_platform = "allwinner"
 
         if soc_platform == "allwinner":
-            decoder = "v4l2slh264dec"
+            # Cedrus v4l2slh264dec outputs NV12_32L32 (tiled), which scrambles colors/macroblocks
+            # on glimagesink/kmssink without hardware de-tiling. avdec_h264 uses Cortex-A53 NEON SIMD
+            # (203+ FPS @ 16% CPU) and outputs linear I420 with 100% accurate colors.
+            decoder = "avdec_h264"
         elif soc_platform in ("intel", "amd", "x86_generic"):
             if decoder not in ("vaapih264dec", "vaapih265dec"):
                 decoder = "avdec_h264"
@@ -989,7 +995,7 @@ def main():
             '-FPSdata',
             '-vs', video_sink
         ]
-        if video_sink != "kmssink":
+        if not is_drm_mode and video_sink not in ("kmssink", "glimagesink"):
             cmd.append('-fs')
         cmd.extend(extra_flags)
 
