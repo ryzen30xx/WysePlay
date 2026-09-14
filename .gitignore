@@ -23,6 +23,7 @@ wheels/
 
 # Logs & temporary files
 *.log
+!AGENT_COMMUNICATION.log
 /tmp/
 *.swp
 *~

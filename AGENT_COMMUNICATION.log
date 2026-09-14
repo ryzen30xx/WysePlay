@@ -1,0 +1,15 @@
+# WysePlay - Agent Communication & Incident Audit Log
+# Format: [YYYY-MM-DD HH:MM:SS] SENDER -> RECEIVER | EVENT_DESCRIPTION
+
+[2026-09-14 11:27:10] SYSTEM -> AGENT | mac_announcer launched as background task with legacy parameters (flags=0x4, MAC=0200D5218EC0).
+[2026-09-14 11:42:10] AGENT -> REPO | Pure Linux DRM/KMS migration committed to main (commit 401be09).
+[2026-09-14 11:46:27] AGENT -> REPO | Fixed .gitignore unanchored lib/ pattern and committed 54 missing UxPlay C source files (commit 3af9194).
+[2026-09-14 11:49:42] USER -> AGENT | Báo cáo lỗi: Thiết bị biến mất khỏi menu Screen Mirroring trên macOS (nó lại mất rồi).
+[2026-09-14 11:50:29] AGENT -> SYSTEM | Root Cause Diagnosis: mac_announcer.py was broadcasting flags=0x4 (missing bit 0x200 Screen Mirroring capability) and mismatched MAC 0200D5218EC0 vs TV Box actual 1200D5218EC0. macOS mDNSResponder classified target as Audio-only and hid it from Screen Mirroring menu.
+[2026-09-14 11:50:33] AGENT -> SYSTEM | Fixed mac_announcer.py: enforced flags=0x204, sf=0x204, MAC=12:00:d5:21:8e:c0, RAOP=1200D5218EC0@P27FBA-RAGL. Restarted announcer process and verified live mDNS registration via dns-sd.
+[2026-09-14 11:51:41] AGENT -> REPO | Pushed announcer fix to GitHub (commit 7738d4c).
+[2026-09-14 11:56:00] AGENT -> REPO | Updated AGENTS.md with Anti-Drift Guardrails, Bitfield Specification, Single Source of Truth rule, and Pre-flight Verification checklist.
+[2026-09-14 13:58:15] USER -> AGENT | Yêu cầu gỡ bỏ SSH tunnel kết nối mạng nội bộ tới NAS 192.168.2.230.
+[2026-09-14 18:30:45] USER -> AGENT | Báo cáo lỗi: Thiết bị lại không hiện dù Mac và TV Box đã cùng mạng LAN 192.168.2.x.
+[2026-09-14 18:31:00] AGENT -> SYSTEM | Root cause: Router Wi-Fi chặn multicast UDP 224.0.0.251 giữa các client Wi-Fi (Client Isolation). Khi tắt tunnel/announcer, mDNS không thể tới Mac. Đồng thời Control Center hủy APEndpoint khi đóng menu nên proxy tĩnh bị bỏ qua khi mở lại.
+[2026-09-14 18:34:00] AGENT -> REPO | Nâng cấp mac_announcer.py với Reactive mDNS query watcher: bắt gói tin mDNS query trên port 5353 để re-announce tức thời mỗi khi mở menu, duy trì hiển thị liên tục 100%.
