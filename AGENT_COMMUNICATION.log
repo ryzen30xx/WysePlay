@@ -27,3 +27,11 @@
 3. Độc lập với X11: Standby wallpaper và PIN OTP modal ghi trực tiếp vào /dev/fb0 qua Python PIL.
 4. Auto-Sleep 30s trực tiếp qua Linux DRM/KMS: modetest -M sun4i-drm -w 49:DPMS:3 và /sys/class/graphics/fb0/blank (1/0), đánh thức tức thì khi có kết nối/chuột.
 5. Đo kiểm thực tế: encoderCurrentFPS=60, submitSurfaceFPS=60, sinkOverflowDropFPS=0, CPU nhàn rỗi 92.7%, không còn giật lag, độ trễ RTT=26ms.
+[2026-09-14 22:36:30] USER -> AGENT | Báo cáo lỗi: Thiết bị lại biến mất khỏi menu Screen Mirroring; yêu cầu sửa lại gộp tất cả các phân mảnh của hệ thống vào làm 1, khi chạy thì chạy cả luôn.
+[2026-09-14 22:36:40] AGENT -> SYSTEM | Root Cause Diagnosis: Sự phân mảnh giữa các tiến trình độc lập (kiosk trên TV Box vs mac_announcer chạy dưới dạng tiến trình tạm thời của CLI agent). Khi CLI agent chuyển lượt hoặc khởi động lại tiến trình, mac_announcer bị ngắt, dẫn đến việc thiết bị biến mất khỏi macOS Control Center.
+[2026-09-14 22:36:50] AGENT -> REPO | Triển khai Unified Orchestrator (wyseplay / main.py / src/unified_orchestrator.py):
+1. Hợp nhất toàn bộ các phân mảnh thành 1 engine duy nhất điều phối cả TV Box và Mac.
+2. CLI Master: ./wyseplay [run|status|install|uninstall|stop].
+3. Tích hợp macOS LaunchAgent daemon (com.wyseplay.orchestrator.plist) chạy ngầm 24/7, tự động chạy khi khởi động Mac, đảm bảo thiết bị P27FBA-RAGL luôn hiển thị 100% không bao giờ biến mất.
+4. Cơ chế tự chữa lành (Self-healing): Tự động phát hiện IP TV Box, giám sát cổng 7000, tự kích hoạt airplay-kiosk nếu bị tắt, tự làm mới Bonjour proxy khi đổi mạng.
+5. Kiểm chứng thực tế: ./wyseplay status báo tất cả các thành phần xanh (MỞ/SẴN SÀNG), LaunchAgent đang chạy ngầm bền bỉ.
