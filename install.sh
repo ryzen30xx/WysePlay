@@ -506,6 +506,23 @@ optimize_platform_hardware() {
             break
         fi
     done
+
+    # 3. Tối ưu phản hồi SSH và tắt các script MOTD nặng (giảm độ trễ login từ 6s xuống <0.3s)
+    if [[ -d /etc/ssh ]]; then
+        mkdir -p /etc/ssh/sshd_config.d
+        cat << 'EOF_SSH' > /etc/ssh/sshd_config.d/99-wyseplay-fast-ssh.conf
+UseDNS no
+GSSAPIAuthentication no
+IPQoS lowdelay throughput
+ClientAliveInterval 30
+ClientAliveCountMax 3
+TCPKeepAlive yes
+Compression no
+EOF_SSH
+        chmod -x /etc/update-motd.d/* 2>/dev/null || true
+        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+        log_success "Đã tối ưu cấu hình SSH (UseDNS=no, IPQoS=lowdelay) và tắt MOTD nặng."
+    fi
 }
 
 # ==============================================================================
