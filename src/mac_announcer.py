@@ -69,6 +69,8 @@ class ReactiveAnnouncer:
 
     def _spawn(self):
         self._kill()
+        # Clean any orphan proxy processes for this service
+        subprocess.run("pkill -9 -f 'dns-sd.*P27FBA-RAGL' 2>/dev/null || true", shell=True)
         self.p_airplay = subprocess.Popen(self.cmd_airplay, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.p_raop = subprocess.Popen(self.cmd_raop, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.last_refresh_time = time.time()
@@ -77,55 +79,17 @@ class ReactiveAnnouncer:
         for p in (self.p_airplay, self.p_raop):
             if p:
                 try:
-                    p.terminate()
-                    p.wait(timeout=0.2)
+                    p.kill()
+                    p.wait(timeout=0.5)
                 except Exception:
-                    try:
-                        p.kill()
-                    except Exception:
-                        pass
+                    pass
         self.p_airplay = None
         self.p_raop = None
 
     def refresh(self, reason="mDNS query"):
-        with self.lock:
-            now = time.time()
-            if now - self.last_refresh_time < 4.0:
-                return
-            print(f"[Mac Announcer] [{time.strftime('%H:%M:%S')}] Discovery event ({reason}) -> refreshing registration...")
-            sys.stdout.flush()
-            self._spawn()
-
-    def reactive_listener(self):
-        """Monitors local mDNS multicast queries on 224.0.0.251:5353."""
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-            s.bind(('', 5353))
-            mreq = struct.pack('4sl', socket.inet_aton('224.0.0.251'), socket.INADDR_ANY)
-            s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
-            s.settimeout(1.0)
-        except Exception as e:
-            print(f"[Mac Announcer] Warning: could not bind multicast query listener: {e}")
-            sys.stdout.flush()
-            return
-
-        while self.running:
-            try:
-                data, addr = s.recvfrom(4096)
-                if len(data) >= 4 and (b'_airplay' in data or b'_raop' in data):
-                    flags = struct.unpack('!H', data[2:4])[0]
-                    is_query = (flags & 0x8000) == 0
-                    if is_query:
-                        self.refresh(reason=f"macOS Screen Mirroring query from {addr[0]}")
-            except socket.timeout:
-                continue
-            except Exception:
-                break
-        try:
-            s.close()
-        except Exception:
-            pass
+        # Stable registration: mDNSResponder automatically answers queries from its internal cache
+        # as long as dns-sd -P is running. Never kill active dns-sd processes during user queries!
+        pass
 
     def run(self):
         print(f"[Mac Announcer] Target TV Box IP: {self.target_ip} (Host: {self.hostname})")
@@ -134,15 +98,16 @@ class ReactiveAnnouncer:
         print(f"[Mac Announcer] Active! '{AIRPLAY_NAME}' is now visible in macOS Control Center.")
         sys.stdout.flush()
 
-        listener_thread = threading.Thread(target=self.reactive_listener, daemon=True)
-        listener_thread.start()
-
         try:
             while self.running:
-                time.sleep(2)
+                time.sleep(3)
                 with self.lock:
-                    if self.p_airplay.poll() is not None or self.p_raop.poll() is not None:
-                        print("[Mac Announcer] Process exited unexpectedly, respawning...")
+                    if not self.running:
+                        break
+                    airplay_dead = self.p_airplay and self.p_airplay.poll() is not None
+                    raop_dead = self.p_raop and self.p_raop.poll() is not None
+                    if airplay_dead or raop_dead:
+                        print(f"[Mac Announcer] Proxy process died (airplay={self.p_airplay.poll() if self.p_airplay else None}, raop={self.p_raop.poll() if self.p_raop else None}), respawning...")
                         sys.stdout.flush()
                         self._spawn()
         except KeyboardInterrupt:
