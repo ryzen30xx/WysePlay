@@ -1,9 +1,5 @@
 #!/bin/bash
-# Native Direct Hardware Rendering Architecture (Android SurfaceFlinger / HWComposer model)
-# Zero X11/Xorg overhead, pure Linux DRM/KMS + Panfrost Mali-G31 GPU EGL/GBM direct scanout
-unset DISPLAY
-export GST_GL_PLATFORM=egl
-export GST_GL_WINDOW=gbm
+export DISPLAY="${DISPLAY:-:0}"
 
 # Ensure framebuffer and DRM display engine are unblanked and active at startup
 echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true

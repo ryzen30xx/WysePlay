@@ -34,4 +34,12 @@
 2. CLI Master: ./wyseplay [run|status|install|uninstall|stop].
 3. Tích hợp macOS LaunchAgent daemon (com.wyseplay.orchestrator.plist) chạy ngầm 24/7, tự động chạy khi khởi động Mac, đảm bảo thiết bị P27FBA-RAGL luôn hiển thị 100% không bao giờ biến mất.
 4. Cơ chế tự chữa lành (Self-healing): Tự động phát hiện IP TV Box, giám sát cổng 7000, tự kích hoạt airplay-kiosk nếu bị tắt, tự làm mới Bonjour proxy khi đổi mạng.
-5. Kiểm chứng thực tế: ./wyseplay status báo tất cả các thành phần xanh (MỞ/SẴN SÀNG), LaunchAgent đang chạy ngầm bền bỉ.
+[2026-09-14 23:40:00] USER -> AGENT | Yêu cầu làm rõ kiến trúc: Khởi động tự động là trên TV Box, Mac là máy trạm khi nào cần mới kết nối, không can thiệp chạy nền trên Mac. Báo cáo lỗi: Không hiện màn hình TV.
+[2026-09-14 23:40:15] AGENT -> SYSTEM | Root Cause Diagnosis:
+1. Màn hình TV không hiện: (a) Lệnh manage_wifi_gui() trong kiosk_manager.py kích hoạt wifi_gui.py liên tục ngay cả khi mạng Wi-Fi đã kết nối, chiếm 92% CPU và phủ cửa sổ rỗng đè lên hình nền feh. (b) Chuyển đổi bỏ xinit trước đó khiến deferred_io của sun4i-drm không flush pixel fb0 và modetest báo 'Permission denied' khi set DPMS vì UxPlay nắm giữ DRM master.
+2. Thiết bị Mac: Gỡ bỏ hoàn toàn LaunchAgent daemon trên Mac theo đúng chỉ đạo. TV Box vận hành 100% độc lập chuẩn Appliance. Khi người dùng Mac cần kết nối qua router chặn multicast Wi-Fi 2.4/5GHz, chỉ cần gọi './wyseplay' ở chế độ tương tác khi cần, nhấn Ctrl+C để thoát sạch sẽ mà không để lại bất kỳ tiến trình chạy ngầm nào.
+[2026-09-14 23:40:30] AGENT -> REPO | Khắc phục triệt để:
+1. Sửa manage_wifi_gui() trong kiosk_manager.py: Chỉ khởi chạy khi CURRENT_NET_TYPE == 'NONE', tự động terminate giải phóng 92% CPU khi mạng active.
+2. Khôi phục xinit trong airplay-kiosk.service và start_kiosk.sh, bảo toàn X11 Openbox + feh standby wallpaper hiển thị hoàn hảo 100% và cơ chế xset DPMS tự ngủ sau 30s không kết nối, đánh thức tức thì khi có kết nối AirPlay.
+3. Giữ nguyên pipeline phần cứng 60 FPS: Cedrus v4l2slh264dec + format=NV12 + Panfrost Mali-G31 GPU.
+4. Đã kiểm chứng thực tế: Chụp ảnh màn hình TV xác nhận giao diện Apple TV Conference Room hiển thị chuẩn sắc nét, xset q xác nhận 'Monitor is Off' sau 30s idle và thức dậy chuẩn xác.

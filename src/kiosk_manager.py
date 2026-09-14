@@ -501,14 +501,24 @@ def monitor_uxplay_output(proc):
         print("[Kiosk] UxPlay monitor error:", e)
 
 def manage_wifi_gui():
-    global WIFI_GUI_PROC
+    global WIFI_GUI_PROC, CURRENT_NET_TYPE
     if not os.environ.get("DISPLAY"):
         return
     with STATE_LOCK:
-        if WIFI_GUI_PROC is None or WIFI_GUI_PROC.poll() is not None:
-            print("[Kiosk] Launching/ensuring unified Standby & Wi-Fi Kiosk UI...")
-            env = dict(os.environ, DISPLAY=":0")
-            WIFI_GUI_PROC = subprocess.Popen(["python3", "-u", "/opt/airplay/wifi_gui.py"], env=env)
+        if CURRENT_NET_TYPE == "NONE":
+            if WIFI_GUI_PROC is None or WIFI_GUI_PROC.poll() is not None:
+                print("[Kiosk] No network: Launching Wi-Fi Onboarding UI...")
+                env = dict(os.environ, DISPLAY=":0")
+                WIFI_GUI_PROC = subprocess.Popen(["python3", "-u", "/opt/airplay/wifi_gui.py"], env=env)
+        else:
+            if WIFI_GUI_PROC is not None and WIFI_GUI_PROC.poll() is None:
+                print("[Kiosk] Network active: Terminating Wi-Fi Onboarding UI...")
+                try:
+                    WIFI_GUI_PROC.terminate()
+                    WIFI_GUI_PROC.wait(timeout=1.0)
+                except Exception:
+                    WIFI_GUI_PROC.kill()
+                WIFI_GUI_PROC = None
 
 def cleanup_and_exit(signum, frame):
     global CURRENT_PROC, WIFI_GUI_PROC
