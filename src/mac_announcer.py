@@ -90,7 +90,7 @@ class ReactiveAnnouncer:
     def refresh(self, reason="mDNS query"):
         with self.lock:
             now = time.time()
-            if now - self.last_refresh_time < 1.5:
+            if now - self.last_refresh_time < 4.0:
                 return
             print(f"[Mac Announcer] [{time.strftime('%H:%M:%S')}] Discovery event ({reason}) -> refreshing registration...")
             sys.stdout.flush()
@@ -113,8 +113,11 @@ class ReactiveAnnouncer:
         while self.running:
             try:
                 data, addr = s.recvfrom(4096)
-                if b'_airplay' in data or b'_raop' in data:
-                    self.refresh(reason="macOS Screen Mirroring query")
+                if len(data) >= 4 and (b'_airplay' in data or b'_raop' in data):
+                    flags = struct.unpack('!H', data[2:4])[0]
+                    is_query = (flags & 0x8000) == 0
+                    if is_query:
+                        self.refresh(reason=f"macOS Screen Mirroring query from {addr[0]}")
             except socket.timeout:
                 continue
             except Exception:
