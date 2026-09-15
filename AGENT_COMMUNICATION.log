@@ -52,3 +52,8 @@
 2. Bỏ cờ -a trong kiosk_manager.py: Đảm bảo UxPlay luôn quảng bá đầy đủ cả _airplay và _raop.
 3. Tích hợp Autonomous mDNS Broadcaster & Query Responder chạy ngầm 100% trên TV Box: Định kỳ 2.5s phát gói mDNS response chuẩn RFC 6762 tới cả 224.0.0.251:5353 và subnet broadcast (192.168.2.255:5353), đồng thời lắng nghe query trên cổng 5353 để phản hồi tức thì 0ms. Vượt qua triệt để tình trạng router chặn multicast giữa 2.4G và 5G mà không cần bất kỳ tiến trình nào trên Mac.
 4. Kiểm chứng thực tế: dns-sd -L trên Mac xác nhận P27FBA-RAGL (_airplay) và 1200D5218EC0@P27FBA-RAGL (_raop) hiển thị bền bỉ 100%, kết nối phản chiếu thành công tức thì, màn hình tự đánh thức ngay khi kết nối đến.
+[2026-09-15 17:45:00] USER -> AGENT | Yêu cầu tăng lên 1080@60P để kiểm chứng render native và kiểm tra nút thắt GPU.
+[2026-09-15 17:45:15] AGENT -> REPO | Cấu hình chuyển đổi sang 1080p @ 60 FPS Native:
+1. Cập nhật /opt/airplay/display_mode.json và /opt/airplay/hw_profile.json sang chế độ sharp_1080p (1920x1080@60fps).
+2. Khởi động lại UxPlay với cờ -s 1920x1080@60 -fps 60, giữ nguyên Cedrus v4l2slh264dec + format=NV12 + xvimagesink GLAMOR Textured Video.
+3. Sẵn sàng nhận luồng Full HD 1080p native 1:1 từ Mac để đo đạc và đánh giá hiệu năng thực tế.
