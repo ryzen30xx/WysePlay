@@ -281,7 +281,7 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
                 g_string_append(launch, converter);
                 g_string_append(launch, " ! ");
             }
-            g_string_append(launch, "queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
+            g_string_append(launch, "queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
             g_string_append(launch, videosink);
             g_string_append(launch, " name=");
             g_string_append(launch, videosink);

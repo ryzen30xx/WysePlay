@@ -1029,6 +1029,9 @@ def main():
     set_inputs(False)
     time.sleep(0.5)
 
+    # Maximize CPU responsiveness for zero-latency decode/render
+    subprocess.run('echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1 || true', shell=True)
+
     # Initial Network status synchronized at kernel level
     CURRENT_NET_TYPE, _, _ = make_wallpaper.check_network_status(wait_sync=True)
     CURRENT_WIFI_GUI_ACTIVE = make_wallpaper.is_wifi_gui_active()
@@ -1195,6 +1198,8 @@ def main():
                 video_sink = video_sink.replace("xvimagesink", "xvimagesink max-lateness=-1")
             if "force-aspect-ratio" not in video_sink:
                 video_sink += " force-aspect-ratio=false draw-borders=false"
+            if "enable-last-sample" not in video_sink:
+                video_sink += " enable-last-sample=false"
 
         # Zero-latency live mirroring mode, persistent client whitelist & PIN prompt
         extra_flags.extend([
