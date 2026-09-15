@@ -1,4 +1,4 @@
-import os, sys, time, subprocess, re, signal, threading, glob, json
+import os, sys, time, subprocess, re, signal, threading, glob, json, socket, struct
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -180,6 +180,201 @@ def periodic_client_discovery():
         time.sleep(10.0)
 
 threading.Thread(target=periodic_client_discovery, daemon=True).start()
+
+def get_active_network_info():
+    """Detects active IPv4 address, broadcast address, MAC address, and hostname."""
+    ip = "192.168.2.97"
+    bcast = "192.168.2.255"
+    mac = "12:00:d5:21:8e:c0"
+    hostname = "x96q.local."
+    try:
+        r = subprocess.check_output("ip -o -4 addr show", shell=True, text=True)
+        for line in r.strip().splitlines():
+            parts = line.split()
+            if "scope global" in line:
+                iface = parts[1]
+                ip_cidr = parts[3]
+                cur_ip = ip_cidr.split("/")[0]
+                cur_bcast = None
+                if "brd" in parts:
+                    idx = parts.index("brd")
+                    cur_bcast = parts[idx + 1]
+                if cur_ip:
+                    ip = cur_ip
+                if cur_bcast:
+                    bcast = cur_bcast
+                try:
+                    with open(f"/sys/class/net/{iface}/address") as f:
+                        cur_mac = f.read().strip()
+                        if cur_mac:
+                            mac = cur_mac
+                except Exception:
+                    pass
+                break
+    except Exception:
+        pass
+    try:
+        h = socket.gethostname()
+        if h:
+            hostname = f"{h.strip()}.local."
+    except Exception:
+        pass
+    return ip, bcast, mac, hostname
+
+def get_server_public_key():
+    """Extracts Ed25519 public key hex from server.pem or fallback."""
+    pem_path = "/opt/airplay/server.pem"
+    if os.path.exists(pem_path):
+        try:
+            cmd = f"openssl pkey -in {pem_path} -pubout -outform DER 2>/dev/null"
+            out = subprocess.check_output(cmd, shell=True)
+            if len(out) >= 32:
+                return out[-32:].hex()
+        except Exception:
+            pass
+    return "a130efa531a109bccb8d1483f26227bacc6b2df48eaaa7c05804f5a89c6c1d17"
+
+def encode_dns_name(name):
+    parts = name.strip('.').split('.')
+    encoded = b''
+    for p in parts:
+        b = p.encode('utf-8')
+        encoded += bytes([len(b)]) + b
+    return encoded + b'\x00'
+
+def encode_dns_txt(txt_list):
+    res = b''
+    for item in txt_list:
+        b = item.encode('utf-8')
+        res += bytes([len(b)]) + b
+    return res
+
+def build_airplay_mdns_packet(ip, bcast, mac, hostname, monitor_name="P27FBA-RAGL"):
+    mac_clean = mac.replace(":", "").upper()
+    mac_colon = mac.lower()
+    raop_name = f"{mac_clean}@{monitor_name}"
+    pk = get_server_public_key()
+    
+    airplay_service = "_airplay._tcp.local."
+    raop_service = "_raop._tcp.local."
+    airplay_instance = f"{monitor_name}._airplay._tcp.local."
+    raop_instance = f"{raop_name}._raop._tcp.local."
+
+    airplay_txt = [
+        f"deviceid={mac_colon}",
+        "features=0x527FFEE6,0x0",
+        "flags=0x204",
+        "model=AppleTV3,2",
+        f"pk={pk}",
+        "pw=false",
+        "srcvers=220.68",
+        "vv=2",
+        "pi=2e388006-13ba-4041-9a67-25dd4a43d536"
+    ]
+
+    raop_txt = [
+        "ch=2", "cn=0,1,2,3", "da=true", "et=0,3,5", "vv=2",
+        "ft=0x527FFEE6,0x0", "am=AppleTV3,2", "md=0,1,2", "rhd=5.6.0.0",
+        "pw=false", "sr=44100", "ss=16", "sv=false", "tp=UDP", "txtvers=1",
+        "sf=0x204", "vs=220.68", "vn=65537",
+        f"pk={pk}",
+        "pi=2e388006-13ba-4041-9a67-25dd4a43d536"
+    ]
+
+    # DNS Header: ID=0, Flags=0x8400 (Response, Authoritative), Questions=0, Answers=2, Authority=0, Additional=5
+    header = struct.pack("!HHHHHH", 0, 0x8400, 0, 2, 0, 5)
+    ttl = 120 # 120 seconds
+
+    # 1. PTR _airplay._tcp.local -> airplay_instance
+    ans1_name = encode_dns_name(airplay_service)
+    ans1_rdata = encode_dns_name(airplay_instance)
+    ans1 = ans1_name + struct.pack("!HHIH", 12, 1, ttl, len(ans1_rdata)) + ans1_rdata
+
+    # 2. PTR _raop._tcp.local -> raop_instance
+    ans2_name = encode_dns_name(raop_service)
+    ans2_rdata = encode_dns_name(raop_instance)
+    ans2 = ans2_name + struct.pack("!HHIH", 12, 1, ttl, len(ans2_rdata)) + ans2_rdata
+
+    # Additional 1: SRV airplay_instance -> port 7000, target hostname
+    add1_name = encode_dns_name(airplay_instance)
+    target_encoded = encode_dns_name(hostname)
+    add1_rdata = struct.pack("!HHH", 0, 0, 7000) + target_encoded
+    add1 = add1_name + struct.pack("!HHIH", 33, 0x8001, ttl, len(add1_rdata)) + add1_rdata
+
+    # Additional 2: TXT airplay_instance
+    add2_name = encode_dns_name(airplay_instance)
+    add2_rdata = encode_dns_txt(airplay_txt)
+    add2 = add2_name + struct.pack("!HHIH", 16, 0x8001, ttl, len(add2_rdata)) + add2_rdata
+
+    # Additional 3: SRV raop_instance -> port 7000, target hostname
+    add3_name = encode_dns_name(raop_instance)
+    add3_rdata = struct.pack("!HHH", 0, 0, 7000) + target_encoded
+    add3 = add3_name + struct.pack("!HHIH", 33, 0x8001, ttl, len(add3_rdata)) + add3_rdata
+
+    # Additional 4: TXT raop_instance
+    add4_name = encode_dns_name(raop_instance)
+    add4_rdata = encode_dns_txt(raop_txt)
+    add4 = add4_name + struct.pack("!HHIH", 16, 0x8001, ttl, len(add4_rdata)) + add4_rdata
+
+    # Additional 5: A hostname -> IP
+    add5_name = encode_dns_name(hostname)
+    add5_rdata = socket.inet_aton(ip)
+    add5 = add5_name + struct.pack("!HHIH", 1, 0x8001, ttl, len(add5_rdata)) + add5_rdata
+
+    return header + ans1 + ans2 + add1 + add2 + add3 + add4 + add5
+
+def autonomous_airplay_announcer():
+    """
+    Autonomous Bonjour/mDNS Announcer running 100% on the TV Box.
+    Broadcasts unsolicited mDNS responses to both 224.0.0.251:5353 and subnet broadcast.
+    Also listens for active client queries on port 5353 for instant 0ms response.
+    Guarantees permanent visibility in macOS Screen Mirroring menu without any software on Mac.
+    """
+    sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock_send.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+    def _query_listener():
+        try:
+            s_listen = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s_listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s_listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+            except AttributeError:
+                pass
+            s_listen.bind(('', 5353))
+            mreq = struct.pack('4sl', socket.inet_aton('224.0.0.251'), socket.INADDR_ANY)
+            s_listen.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            while True:
+                data, addr = s_listen.recvfrom(2048)
+                if b'_airplay' in data or b'_raop' in data:
+                    cur_name = CURRENT_DISPLAY[0] if CURRENT_DISPLAY else "P27FBA-RAGL"
+                    ip, bcast, mac, hostname = get_active_network_info()
+                    pkt = build_airplay_mdns_packet(ip, bcast, mac, hostname, cur_name)
+                    sock_send.sendto(pkt, ("224.0.0.251", 5353))
+                    if bcast:
+                        sock_send.sendto(pkt, (bcast, 5353))
+                    if addr[0] != "127.0.0.1" and addr[0] != ip:
+                        try:
+                            sock_send.sendto(pkt, addr)
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"[Kiosk] mDNS query listener stopped: {e}", flush=True)
+
+    threading.Thread(target=_query_listener, daemon=True, name="mDNSQueryListener").start()
+    print("[Kiosk] Autonomous AirPlay mDNS Announcer & Query Responder started on TV Box.")
+
+    while True:
+        try:
+            cur_name = CURRENT_DISPLAY[0] if CURRENT_DISPLAY else "P27FBA-RAGL"
+            ip, bcast, mac, hostname = get_active_network_info()
+            pkt = build_airplay_mdns_packet(ip, bcast, mac, hostname, cur_name)
+            sock_send.sendto(pkt, ("224.0.0.251", 5353))
+            if bcast:
+                sock_send.sendto(pkt, (bcast, 5353))
+        except Exception:
+            pass
+        time.sleep(2.5)
 
 def wake_display(reason="Activity"):
     global LAST_ACTIVITY, MONITOR_ASLEEP
@@ -663,6 +858,9 @@ def hotplug_and_network_watcher():
                 else:
                     disconnect_strikes = 0
                     if event_triggered:
+                        # Do not wake up or reconfigure display while in DPMS sleep
+                        if MONITOR_ASLEEP:
+                            continue
                         time.sleep(1.0)
                         subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
                         time.sleep(0.5)
@@ -849,6 +1047,7 @@ def main():
     hotplug_and_network_watcher()
     threading.Thread(target=display_power_manager, daemon=True, name="DisplayPowerManager").start()
     threading.Thread(target=discover_network_airplay_clients, daemon=True, name="InitialClientDiscovery").start()
+    threading.Thread(target=autonomous_airplay_announcer, daemon=True, name="AutonomousAirPlayAnnouncer").start()
 
     # Launch or close Wi-Fi GUI based on verified initial network state
     manage_wifi_gui()
@@ -1019,12 +1218,9 @@ def main():
             print(f"[Kiosk] Warning: Failed to detect active MAC: {e}")
 
 
-        # Check if connected digital display (HDMI/DisplayPort) has audio capability
-        if not has_audio:
-            print(f"[Kiosk] Display Audio Check: Thiết bị '{monitor_name}' KHÔNG có loa/âm thanh ({audio_reason}). Tự động tắt quảng bá Audio (-a) để thiết bị phát giữ nguyên âm thanh loa máy tính!")
-            extra_flags.append('-a')
-        else:
-            print(f"[Kiosk] Display Audio Check: Thiết bị '{monitor_name}' CÓ hỗ trợ âm thanh số HDMI/DP ({audio_reason}). Bật tính năng Audio AirPlay.")
+        # AirPlay Screen Mirroring specification requires both _airplay._tcp and _raop._tcp
+        # Do not disable audio (-a), as doing so prevents Apple clients from recognizing the display in Screen Mirroring.
+        print(f"[Kiosk] AirPlay Screen Mirroring: Advertising both Video (_airplay) and Audio (_raop) as Apple TV target '{monitor_name}'.")
 
         cmd = [
             'stdbuf', '-oL', '-eL',
