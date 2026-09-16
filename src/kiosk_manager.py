@@ -830,6 +830,7 @@ def hotplug_and_network_watcher():
                 print("[Hotplug] pyudev init error:", e)
 
         disconnect_strikes = 0
+        last_active_iface = None
         while True:
             event_triggered = False
             if udev_monitor:
@@ -881,6 +882,24 @@ def hotplug_and_network_watcher():
                                 restart_uxplay_for_display(stable_info)
             except Exception as e:
                 print("[Hotplug] Check error:", e)
+
+            # 3. Check active network interface changes (e.g. Ethernet cable plugged in or unplugged)
+            try:
+                r_route = subprocess.check_output("ip route get 1.1.1.1 2>/dev/null", shell=True, text=True)
+                m_iface = re.search(r"dev\s+(\S+)", r_route)
+                current_iface = m_iface.group(1) if m_iface else None
+                if current_iface:
+                    if last_active_iface is not None and current_iface != last_active_iface:
+                        print(f"[Network] Active interface changed from {last_active_iface} -> {current_iface}!")
+                        last_active_iface = current_iface
+                        with STATE_LOCK:
+                            is_streaming = CURRENT_LOCKED or os.path.exists("/tmp/airplay_streaming")
+                        if not is_streaming:
+                            stop_uxplay(reason=f"Network interface changed to {current_iface}")
+                    elif last_active_iface is None:
+                        last_active_iface = current_iface
+            except Exception:
+                pass
 
     t = threading.Thread(target=_watch, daemon=True, name="HotplugWatcher")
     t.start()

@@ -49,10 +49,17 @@ static bool video_terminate = false;
 #define NCODECS  2   /* renderers for h264 and h265 */
 
 static uint64_t total_frames_received = 0;
+static uint64_t total_frames_decoded = 0;
 static uint64_t total_frames_rendered = 0;
 static GstPadProbeReturn sink_pad_probe(GstPad *pad, GstPadProbeInfo *info, gpointer user_data) {
     if (info->type & GST_PAD_PROBE_TYPE_BUFFER) {
         total_frames_rendered++;
+    }
+    return GST_PAD_PROBE_OK;
+}
+static GstPadProbeReturn dec_pad_probe(GstPad *pad, GstPadProbeInfo *info, gpointer user_data) {
+    if (info->type & GST_PAD_PROBE_TYPE_BUFFER) {
+        total_frames_decoded++;
     }
     return GST_PAD_PROBE_OK;
 }
@@ -281,7 +288,7 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
                 g_string_append(launch, converter);
                 g_string_append(launch, " ! ");
             }
-            g_string_append(launch, "queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
+            g_string_append(launch, "queue name=display_queue max-size-buffers=3 max-size-bytes=0 max-size-time=0 leaky=downstream ! ");
             g_string_append(launch, videosink);
             g_string_append(launch, " name=");
             g_string_append(launch, videosink);
@@ -336,6 +343,15 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
                     gst_object_unref(sinkpad);
                 }
                 gst_object_unref(sink_elem);
+            }
+            GstElement *q_elem = gst_bin_get_by_name(GST_BIN(renderer_type[i]->pipeline), "display_queue");
+            if (q_elem) {
+                GstPad *q_sinkpad = gst_element_get_static_pad(q_elem, "sink");
+                if (q_sinkpad) {
+                    gst_pad_add_probe(q_sinkpad, GST_PAD_PROBE_TYPE_BUFFER, dec_pad_probe, NULL, NULL);
+                    gst_object_unref(q_sinkpad);
+                }
+                gst_object_unref(q_elem);
             }
             g_string_free(launch, TRUE);
             gst_caps_unref(caps);
@@ -449,25 +465,31 @@ void video_renderer_render_buffer(unsigned char* data, int *data_len, int *nal_c
     total_frames_received++;
     static uint64_t last_stat_time = 0;
     static uint64_t last_rx = 0;
+    static uint64_t last_dec = 0;
     static uint64_t last_rend = 0;
     uint64_t now_ms = (uint64_t) (gst_util_get_timestamp() / 1000000);
     if (last_stat_time == 0) {
         last_stat_time = now_ms;
         last_rx = total_frames_received;
+        last_dec = total_frames_decoded;
         last_rend = total_frames_rendered;
     } else if (now_ms - last_stat_time >= 2000) {
         double dt = (double) (now_ms - last_stat_time) / 1000.0;
         uint64_t d_rx = total_frames_received - last_rx;
+        uint64_t d_dec = total_frames_decoded - last_dec;
         uint64_t d_rend = total_frames_rendered - last_rend;
         uint64_t d_drop = (d_rx > d_rend) ? (d_rx - d_rend) : 0;
         double rx_fps = (double) d_rx / dt;
+        double dec_fps = (double) d_dec / dt;
         double rend_fps = (double) d_rend / dt;
         double drop_pct = (d_rx > 0) ? ((double) d_drop * 100.0 / (double) d_rx) : 0.0;
-        logger_log(logger, LOGGER_INFO, "[FRAME STATS] Network In: %.1f FPS | Displayed: %.1f FPS | Dropped: %llu (%.1f%%) | Total In: %llu, Rendered: %llu",
-                   rx_fps, rend_fps, (unsigned long long) d_drop, drop_pct,
-                   (unsigned long long) total_frames_received, (unsigned long long) total_frames_rendered);
+        logger_log(logger, LOGGER_INFO, "[FRAME STATS] Network In: %.1f FPS | Decoded: %.1f FPS | Displayed: %.1f FPS | Dropped: %llu (%.1f%%) | Dec/Disp Drop: %llu/%llu",
+                   rx_fps, dec_fps, rend_fps, (unsigned long long) d_drop, drop_pct,
+                   (unsigned long long) (d_rx > d_dec ? d_rx - d_dec : 0),
+                   (unsigned long long) (d_dec > d_rend ? d_dec - d_rend : 0));
         last_stat_time = now_ms;
         last_rx = total_frames_received;
+        last_dec = total_frames_decoded;
         last_rend = total_frames_rendered;
     }
     GstBuffer *buffer;
