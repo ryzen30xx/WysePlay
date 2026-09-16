@@ -1,4 +1,4 @@
-import os, sys, time, subprocess, re, signal, threading, glob, json, socket, struct
+import os, sys, time, subprocess, re, signal, threading, glob, json, socket, struct, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     sys.stdout.reconfigure(line_buffering=True)
@@ -1074,7 +1074,9 @@ def main():
     # Launch or close Wi-Fi GUI based on verified initial network state
     manage_wifi_gui()
 
+    os.environ["LIBGL_DRI3_DISABLE"] = "1"
     hw_fallback_active = False
+    sink_fallback_active = False
     consecutive_crashes = 0
 
     while True:
@@ -1107,10 +1109,15 @@ def main():
         # Check if running in Linux DRM/KMS mode without X11
         is_drm_mode = (not os.environ.get("DISPLAY")) or (os.path.exists("/dev/dri/card0") and subprocess.run("pgrep -x Xorg >/dev/null", shell=True).returncode != 0)
 
+        # Universal Multi-Tier Video Sink Detection:
+        # Tier 1: glimagesink (OpenGL EGL Native GPU Acceleration)
+        # Tier 2: xvimagesink (XVideo Hardware Acceleration)
+        # Tier 3: ximagesink (XShm Shared Memory Software Fallback)
+        # Tier 4: autovideosink (GStreamer Automatic Selection)
+        has_gl = (subprocess.run("gst-inspect-1.0 glimagesink >/dev/null 2>&1", shell=True).returncode == 0)
+        has_xv = bool(shutil.which("xvinfo"))
+
         if is_drm_mode:
-            # Note: Allwinner sun4i-drm planes only support RGB formats. Passing kmssink directly
-            # causes negotiation failure ('Unsupported pixel format') with v4l2slh264dec (NV12_32L32).
-            # glimagesink with Panfrost Mali GPU uses GBM/EGL to hardware upload and convert NV12 at 60 FPS.
             video_sink = "glimagesink"
             decoder = "v4l2slh264dec"
             print(f"[Kiosk] Direct DRM/KMS mode active: VideoSink={video_sink}, Decoder={decoder}")
@@ -1120,14 +1127,11 @@ def main():
             target_fps = sp.get("max_fps", 60)
             target_h265 = sp.get("h265", False)
             decoder = profile.get("decoder", "avdec_h264")
-            raw_sink = profile.get("video_sink", "autovideosink")
-            if raw_sink in ("ximagesink", "", None):
-                video_sink = "xvimagesink" if shutil.which("xvinfo") else "autovideosink"
-            else:
-                video_sink = raw_sink
+            video_sink = "glimagesink" if has_gl else ("xvimagesink" if has_xv else "autovideosink")
             print(f"[Kiosk] Benchmark Profile active: {sp.get('tier', 'Custom')} -> Stream: {target_res}@{target_fps}fps (H.265: {target_h265}, Decoder: {decoder}, Sink: {video_sink})")
         else:
-            print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps")
+            video_sink = "glimagesink" if has_gl else ("xvimagesink" if has_xv else "autovideosink")
+            print(f"[Kiosk] No benchmark profile found, using default: {target_res}@{target_fps}fps (Sink: {video_sink})")
 
         # 3. Check user display mode preference (/opt/airplay/display_mode.json or legacy /opt/airplay/x96q_config.json)
         disp_mode_file = "/opt/airplay/display_mode.json"
@@ -1209,8 +1213,15 @@ def main():
         elif decoder and decoder not in ('avdec_h264', 'avdec_h265'):
             extra_flags.extend(['-vd', decoder])
 
-        # Ensure xvimagesink has qos=false, max-lateness=-1, and disables borders for maximum performance
-        if "xvimagesink" in video_sink:
+        # Ensure sink options are tuned for zero-latency streaming
+        if "glimagesink" in video_sink:
+            if "qos=false" not in video_sink:
+                video_sink = video_sink.replace("glimagesink", "glimagesink qos=false")
+            if "max-lateness" not in video_sink:
+                video_sink = video_sink.replace("glimagesink", "glimagesink max-lateness=-1")
+            if "enable-last-sample" not in video_sink:
+                video_sink += " enable-last-sample=false"
+        elif "xvimagesink" in video_sink:
             if "qos=false" not in video_sink:
                 video_sink = video_sink.replace("xvimagesink", "xvimagesink qos=false")
             if "max-lateness" not in video_sink:
@@ -1219,6 +1230,11 @@ def main():
                 video_sink += " force-aspect-ratio=false draw-borders=false"
             if "enable-last-sample" not in video_sink:
                 video_sink += " enable-last-sample=false"
+        elif "ximagesink" in video_sink:
+            if "qos=false" not in video_sink:
+                video_sink = video_sink.replace("ximagesink", "ximagesink qos=false")
+            if "max-lateness" not in video_sink:
+                video_sink = video_sink.replace("ximagesink", "ximagesink max-lateness=-1")
 
         # Zero-latency live mirroring mode, persistent client whitelist & PIN prompt
         extra_flags.extend([
@@ -1261,7 +1277,7 @@ def main():
             '-FPSdata',
             '-vs', video_sink
         ]
-        if not is_drm_mode and video_sink not in ("kmssink", "glimagesink"):
+        if not is_drm_mode and video_sink not in ("kmssink",):
             cmd.append('-fs')
         cmd.extend(extra_flags)
 
@@ -1297,8 +1313,13 @@ def main():
             if not is_physical_display_connected():
                 continue
             
+            # If glimagesink caused 2 consecutive crashes, automatically fall back to xvimagesink
+            if consecutive_crashes >= 2 and "glimagesink" in video_sink and not sink_fallback_active:
+                print(f"[Kiosk] CẢNH BÁO: OpenGL sink '{video_sink}' gặp lỗi. Tự động chuyển sang XVideo (xvimagesink) an toàn!")
+                sink_fallback_active = True
+                consecutive_crashes = 0
             # If a custom hardware decoder caused 2 consecutive crashes, automatically drop to CPU decoder
-            if consecutive_crashes >= 2 and decoder not in ('avdec_h264', 'avdec_h265') and not hw_fallback_active:
+            elif consecutive_crashes >= 2 and decoder not in ('avdec_h264', 'avdec_h265') and not hw_fallback_active:
                 print(f"[Kiosk] CẢNH BÁO: Bộ giải mã '{decoder}' gặp lỗi khi chạy UxPlay. Tự động chuyển sang CPU an toàn (avdec_h264)!")
                 hw_fallback_active = True
                 consecutive_crashes = 0

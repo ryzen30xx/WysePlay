@@ -1,5 +1,6 @@
 #!/bin/bash
 export DISPLAY="${DISPLAY:-:0}"
+export LIBGL_DRI3_DISABLE=1
 
 # Ensure framebuffer and DRM display engine are unblanked and active at startup
 echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true

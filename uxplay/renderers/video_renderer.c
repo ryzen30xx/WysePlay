@@ -358,7 +358,7 @@ void  video_renderer_init(logger_t *render_logger, const char *server_name, vide
 	    gst_object_unref(clock);
         }	
 #ifdef X_DISPLAY_FIX
-        use_x11 = (strstr(videosink, "xvimagesink") || strstr(videosink, "ximagesink") || auto_videosink);
+        use_x11 = (strstr(videosink, "xvimagesink") || strstr(videosink, "ximagesink") || strstr(videosink, "glimagesink") || auto_videosink);
         fullscreen = initial_fullscreen;
         renderer_type[i]->server_name = server_name;
         renderer_type[i]->gst_window = NULL;
@@ -683,7 +683,7 @@ ESSAGE_STATE_CHANGED:
                                " (renderer %d: %s) is \"%ssink\"", renderer_type[type]->id + 1,
                                renderer_type[type]->codec, sink);
 #ifdef X_DISPLAY_FIX
-                    renderer_type[type]->use_x11 = (strstr(sink, "ximage") || strstr(sink, "xvimage"));
+                    renderer_type[type]->use_x11 = (strstr(sink, "ximage") || strstr(sink, "xvimage") || strstr(sink, "glimage"));
 #endif
 		    renderer_type[type]->autovideo = false;
                 }
