@@ -168,9 +168,14 @@ log_success "Đã khôi phục và kích hoạt giao diện dòng lệnh (login 
 
 # 4. Remove WysePlay Application Files & Binaries
 log_step "Xóa tệp chương trình, nhị phân và tài nguyên ứng dụng..."
-if [[ -d /opt/airplay ]]; then
+if [[ -d /opt/airplay || -L /opt/airplay ]]; then
     rm -rf /opt/airplay
     log_success "Đã xóa thư mục ứng dụng: /opt/airplay"
+fi
+
+if [[ -d /opt/wyseplay || -L /opt/wyseplay ]]; then
+    rm -rf /opt/wyseplay
+    log_success "Đã xóa liên kết/thư mục: /opt/wyseplay"
 fi
 
 if [[ -f /etc/wyseplay.conf ]]; then

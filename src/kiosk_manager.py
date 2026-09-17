@@ -32,6 +32,57 @@ IP_TO_MAC_CACHE = {}
 MAC_TO_IPS_CACHE = {}
 CACHE_LOCK = threading.Lock()
 
+def load_env_config():
+    """
+    Loads configuration from /opt/wyseplay/.env or /opt/airplay/.env.
+    Supports comments (#), quotes, and case-insensitive boolean values.
+    """
+    env_paths = ["/opt/wyseplay/.env", "/opt/airplay/.env"]
+    config = {
+        "ENABLE_LOGS": False,
+        "DEBUG_VERBOSE": False,
+    }
+    for p in env_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip("'\"")
+                            if k == "ENABLE_LOGS":
+                                config["ENABLE_LOGS"] = v.lower() in ("true", "1", "yes", "on")
+                            elif k == "DEBUG_VERBOSE":
+                                config["DEBUG_VERBOSE"] = v.lower() in ("true", "1", "yes", "on")
+                            else:
+                                config[k] = v
+                break
+            except Exception as e:
+                print(f"[Kiosk] Warning: Failed to read {p}: {e}")
+    return config
+
+def purge_old_logs():
+    """
+    Purges all old runtime log files when logging is disabled.
+    Protects RAM and ensures clean state.
+    """
+    targets = [
+        "/tmp/uxplay.log",
+        "/tmp/kiosk.log",
+        "/tmp/wyseplay.log",
+        "/tmp/wyseplay_err.log"
+    ]
+    for target in targets:
+        try:
+            if os.path.exists(target):
+                os.remove(target)
+        except OSError:
+            pass
+
 def normalize_ip(ip_str):
     if not ip_str:
         return None
@@ -575,34 +626,58 @@ def monitor_uxplay_output(proc):
     """
     Reads UxPlay stdout line-by-line in real time.
     Detects stream start, PIN prompts, and end events with 0ms delay.
-    Maintains a strictly bounded log size (max ~1MB) to protect RAM.
+    If ENABLE_LOGS is True in /opt/wyseplay/.env, writes to /tmp/uxplay.log (capped at ~2MB).
+    If ENABLE_LOGS is False, no log is written and any existing logs are purged.
     """
+    global LAST_CLIENT_IP
     log_file = "/tmp/uxplay.log"
-    try:
-        # Check size before opening, truncate if > 1MB
+    env_cfg = load_env_config()
+    enable_logs = env_cfg.get("ENABLE_LOGS", False)
+
+    ux_log = None
+    if enable_logs:
         try:
-            if os.path.exists(log_file) and os.path.getsize(log_file) > 1048576:
+            if os.path.exists(log_file) and os.path.getsize(log_file) > 2097152:
                 with open(log_file, "r", errors="ignore") as f:
                     tail_lines = f.readlines()[-1000:]
                 with open(log_file, "w") as f:
                     f.writelines(tail_lines)
+            ux_log = open(log_file, "a")
         except Exception:
-            pass
+            ux_log = None
+    else:
+        purge_old_logs()
 
-        line_count = 0
-        with open(log_file, "a") as ux_log:
-            for line in iter(proc.stdout.readline, ''):
-                if not line:
-                    break
-                ux_log.write(line)
-                ux_log.flush()
-                line_count += 1
+    line_count = 0
+    try:
+        for line in iter(proc.stdout.readline, ''):
+            if not line:
+                break
 
-                # Periodically truncate if log grows past 1MB during long sessions
-                if line_count >= 500:
-                    line_count = 0
+            # Dynamic check every 500 lines
+            line_count += 1
+            if line_count >= 500:
+                line_count = 0
+                env_cfg = load_env_config()
+                new_enable_logs = env_cfg.get("ENABLE_LOGS", False)
+                if new_enable_logs != enable_logs:
+                    enable_logs = new_enable_logs
+                    if not enable_logs:
+                        if ux_log:
+                            try:
+                                ux_log.close()
+                            except Exception:
+                                pass
+                            ux_log = None
+                        purge_old_logs()
+                    else:
+                        try:
+                            ux_log = open(log_file, "a")
+                        except Exception:
+                            ux_log = None
+                elif enable_logs and ux_log:
                     try:
-                        if os.path.getsize(log_file) > 1048576:
+                        if os.path.getsize(log_file) > 2097152:
                             ux_log.close()
                             with open(log_file, "r", errors="ignore") as f:
                                 tail_lines = f.readlines()[-1000:]
@@ -611,6 +686,10 @@ def monitor_uxplay_output(proc):
                             ux_log = open(log_file, "a")
                     except Exception:
                         pass
+
+            if ux_log and enable_logs:
+                ux_log.write(line)
+                ux_log.flush()
 
                 # 1. Wake display instantly upon any incoming client connection request
                 if (
@@ -722,6 +801,12 @@ def monitor_uxplay_output(proc):
                     # Do not kill UxPlay on disconnect, preventing mDNS flapping and device disappearance on client devices.
     except Exception as e:
         print("[Kiosk] UxPlay monitor error:", e)
+    finally:
+        if ux_log:
+            try:
+                ux_log.close()
+            except Exception:
+                pass
 
 def manage_wifi_gui():
     global WIFI_GUI_PROC, CURRENT_NET_TYPE
@@ -1050,6 +1135,13 @@ check_hdmi_audio_support = check_display_audio_support
 
 def main():
     global CURRENT_PROC, CURRENT_DISPLAY, CURRENT_NET_TYPE, CURRENT_WIFI_GUI_ACTIVE
+
+    env_cfg = load_env_config()
+    if not env_cfg.get("ENABLE_LOGS", False):
+        purge_old_logs()
+    else:
+        print("[Kiosk] Debug logging ENABLED via /opt/wyseplay/.env (ENABLE_LOGS=true)")
+
     is_x11 = bool(os.environ.get("DISPLAY")) and subprocess.run("pgrep -x Xorg >/dev/null", shell=True).returncode == 0
     if not is_x11 and 'DISPLAY' in os.environ:
         del os.environ['DISPLAY']
@@ -1322,19 +1414,33 @@ def main():
             cmd.append('-fs')
         cmd.extend(extra_flags)
 
-        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p, smooth clock-synced)...")
-        try:
-            if os.path.exists("/tmp/uxplay.log") and os.path.getsize("/tmp/uxplay.log") > 1048576:
-                with open("/tmp/uxplay.log", "r", errors="ignore") as f:
-                    tail_lines = f.readlines()[-1000:]
-                with open("/tmp/uxplay.log", "w") as f:
-                    f.writelines(tail_lines)
-        except Exception:
-            pass
+        # Check environment configuration for debug logging
+        env_cfg = load_env_config()
+        enable_logs = env_cfg.get("ENABLE_LOGS", False)
+        debug_verbose = env_cfg.get("DEBUG_VERBOSE", False)
 
-        with open("/tmp/uxplay.log", "a") as ux_log:
-            ux_log.write(f"\n--- [Kiosk] UxPlay Starting at {time.strftime('%Y-%m-%d %H:%M:%S')} (cmd: {' '.join(cmd)}) ---\n")
-            ux_log.flush()
+        if enable_logs and debug_verbose:
+            cmd.extend(['-FPSdata', '-d'])
+
+        print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p, smooth clock-synced)...")
+        if enable_logs:
+            try:
+                if os.path.exists("/tmp/uxplay.log") and os.path.getsize("/tmp/uxplay.log") > 2097152:
+                    with open("/tmp/uxplay.log", "r", errors="ignore") as f:
+                        tail_lines = f.readlines()[-1000:]
+                    with open("/tmp/uxplay.log", "w") as f:
+                        f.writelines(tail_lines)
+            except Exception:
+                pass
+
+            try:
+                with open("/tmp/uxplay.log", "a") as ux_log:
+                    ux_log.write(f"\n--- [Kiosk] UxPlay Starting at {time.strftime('%Y-%m-%d %H:%M:%S')} (cmd: {' '.join(cmd)}) ---\n")
+                    ux_log.flush()
+            except Exception:
+                pass
+        else:
+            purge_old_logs()
 
         with STATE_LOCK:
             CURRENT_PROC = subprocess.Popen(

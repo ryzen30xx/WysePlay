@@ -480,9 +480,30 @@ deploy_application() {
         chmod 644 "${APP_DIR}/assets/benchmark"/* 2>/dev/null || true
     fi
 
+    # Create /opt/wyseplay symlink pointing to /opt/airplay
+    ln -sfn "${APP_DIR}" /opt/wyseplay
+    chown -h "${TARGET_USER}:${TARGET_GROUP}" /opt/wyseplay 2>/dev/null || true
+
+    # Deploy default .env configuration if not exists
+    if [[ ! -f "${APP_DIR}/.env" ]]; then
+        if [[ -f "${SOURCE_DIR}/.env.example" ]]; then
+            cp -f "${SOURCE_DIR}/.env.example" "${APP_DIR}/.env"
+        else
+            cat << 'EOF' > "${APP_DIR}/.env"
+# WysePlay Receiver Configuration
+# ENABLE_LOGS: Bật hoặc tắt ghi file logs (true/false)
+ENABLE_LOGS=false
+DEBUG_VERBOSE=false
+EOF
+        fi
+        chown "${TARGET_USER}:${TARGET_GROUP}" "${APP_DIR}/.env"
+        chmod 644 "${APP_DIR}/.env"
+        log_success "Đã khởi tạo cấu hình môi trường: /opt/wyseplay/.env (Mặc định: ENABLE_LOGS=false)"
+    fi
+
     # Set ownership
     chown -R "${TARGET_USER}:${TARGET_GROUP}" "${APP_DIR}"
-    log_success "Đã triển khai toàn bộ scripts và assets vào: ${APP_DIR}"
+    log_success "Đã triển khai toàn bộ scripts và assets vào: ${APP_DIR} (/opt/wyseplay)"
 }
 
 # ==============================================================================
@@ -775,7 +796,8 @@ main() {
     echo -e "${C_BOLD}${C_GREEN}======================================================================${C_RESET}"
     echo ""
     echo -e "${C_BOLD}Thông tin thiết bị:${C_RESET}"
-    echo -e "  • Thư mục cài đặt:   ${C_CYAN}/opt/airplay${C_RESET}"
+    echo -e "  • Thư mục cài đặt:   ${C_CYAN}/opt/wyseplay${C_RESET} (hoặc /opt/airplay)"
+    echo -e "  • Cấu hình & Logs:   ${C_CYAN}/opt/wyseplay/.env${C_RESET}"
     echo -e "  • Người dùng Kiosk:   ${C_CYAN}${TARGET_USER}${C_RESET}"
     echo -e "  • Tên dịch vụ:        ${C_CYAN}airplay-kiosk.service${C_RESET}"
     if [[ -f /opt/airplay/display_mode.json ]]; then

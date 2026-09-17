@@ -251,6 +251,24 @@ sudo systemctl stop airplay-kiosk
 - Mở file `/opt/airplay/kiosk_manager.py`, tìm đoạn gọi `uxplay -n monitor_name` và sửa thành tên bạn mong muốn (ví dụ: `-n "Phòng Họp 01"`).
 </details>
 
+<details>
+<summary><b>4. Cấu hình bật/tắt ghi file logs hệ thống (/opt/wyseplay/.env)?</b></summary>
+
+- WysePlay hỗ trợ cấu hình qua file `/opt/wyseplay/.env` (hoặc `/opt/airplay/.env`):
+  ```bash
+  # Chỉnh sửa cấu hình
+  sudo nano /opt/wyseplay/.env
+  ```
+- Các tham số:
+  - `ENABLE_LOGS=false` *(Mặc định)*: Hoàn toàn không ghi log ra file, tự động xóa sạch log cũ trong `/tmp` để tiết kiệm RAM và bảo vệ hệ thống tuyệt đối.
+  - `ENABLE_LOGS=true`: Ghi toàn bộ logs của các dịch vụ (`kiosk_manager` ra `/tmp/kiosk.log`, `uxplay` ra `/tmp/uxplay.log`) để phục vụ debug.
+  - `DEBUG_VERBOSE=true`: Khi `ENABLE_LOGS=true`, cờ này sẽ bật thêm `-FPSdata` và `-d` để phân tích chi tiết từng gói tin và FPS của luồng stream.
+- Khởi động lại dịch vụ sau khi đổi cấu hình:
+  ```bash
+  sudo systemctl restart airplay-kiosk.service
+  ```
+</details>
+
 ---
 
 ## 🗑️ Gỡ Cài Đặt (Uninstallation)

@@ -58,10 +58,28 @@ if [ -n "$DISPLAY" ]; then
     fi
 fi
 
-# Keep /tmp/kiosk.log bounded to <= 1MB
-if [ -f /tmp/kiosk.log ] && [ $(stat -c%s /tmp/kiosk.log 2>/dev/null || echo 0) -gt 1048576 ]; then
-    tail -n 1000 /tmp/kiosk.log > /tmp/kiosk.log.tmp && mv /tmp/kiosk.log.tmp /tmp/kiosk.log
-fi
+# ==============================================================================
+# WysePlay Environment Config (.env)
+# ==============================================================================
+ENABLE_LOGS=false
+for env_file in /opt/wyseplay/.env /opt/airplay/.env; do
+    if [ -f "$env_file" ]; then
+        val=$(grep -E '^[[:space:]]*ENABLE_LOGS=' "$env_file" 2>/dev/null | tail -n 1 | cut -d '=' -f2- | tr -d ' "\r' | tr '[:upper:]' '[:lower:]')
+        if [ "$val" = "true" ] || [ "$val" = "1" ] || [ "$val" = "yes" ] || [ "$val" = "on" ]; then
+            ENABLE_LOGS=true
+        fi
+        break
+    fi
+done
 
-# Run Kiosk Manager in native DRM or X11 mode
-exec python3 -u /opt/airplay/kiosk_manager.py 2>&1 | tee -a /tmp/kiosk.log
+if [ "$ENABLE_LOGS" = "true" ]; then
+    # Keep /tmp/kiosk.log bounded to <= 2MB
+    if [ -f /tmp/kiosk.log ] && [ $(stat -c%s /tmp/kiosk.log 2>/dev/null || echo 0) -gt 2097152 ]; then
+        tail -n 1000 /tmp/kiosk.log > /tmp/kiosk.log.tmp && mv /tmp/kiosk.log.tmp /tmp/kiosk.log
+    fi
+    exec python3 -u /opt/airplay/kiosk_manager.py 2>&1 | tee -a /tmp/kiosk.log
+else
+    # Logging disabled: Delete old logs and run directly without writing log files
+    rm -f /tmp/kiosk.log /tmp/uxplay.log /tmp/wyseplay*.log 2>/dev/null || true
+    exec python3 -u /opt/airplay/kiosk_manager.py
+fi
