@@ -124,4 +124,21 @@
    - Khởi động lại airplay-kiosk.service.
    - Chụp màn hình DISPLAY=:0 và phân tích màu sắc: Màn hình hiển thị đầy đủ hình nền standby sắc nét 1920x1080 (197 mã màu, text và icon rõ ràng).
    - Mô phỏng chu kỳ on_stream_started() -> màn hình đen 1 màu (#000000) -> on_stream_ended() -> khôi phục tức thì 197 màu hình nền standby thành công 100%.
-
+[2026-09-17 22:00:00] USER -> AGENT | Báo cáo: Lại mất tính năng sleep sau 30s rồi, điều tra và check lại tính năng đi.
+[2026-09-17 22:00:30] AGENT -> SYSTEM | Root Cause Diagnosis:
+1. State Desynchronization: Cờ MONITOR_ASLEEP trong kiosk_manager.py chỉ là biến bộ nhớ trong Python. Khi màn hình bị đánh thức hoặc thay đổi trạng thái bên ngoài X11/DRM, MONITOR_ASLEEP giữ giá trị True. Trong display_power_manager(), điều kiện 'if not MONITOR_ASLEEP:' bị chặn vĩnh viễn, khiến hàm sleep_display() không bao giờ được gọi lại.
+2. Vô hiệu hóa DPMS: Trong wake_display(), on_stream_started() và on_stream_ended() từng thực thi lệnh 'DISPLAY=:0 xset -dpms'. Trong X11, '-dpms' tắt hoàn toàn hệ thống quản lý năng lượng màn hình của X server (DPMS is Disabled).
+3. Nhận diện nhầm stream start: monitor_uxplay_output() bắt chuỗi "Initialized GStreamer video renderer" và "identified as Connection type RAOP" làm cờ bắt đầu stream, khiến CURRENT_LOCKED chuyển sang True ngay khi UxPlay khởi động và liên tục reset LAST_ACTIVITY mỗi giây.
+4. Xung đột DRM Master: Lệnh modetest bị lỗi 'Permission denied' do Xorg đang giữ quyền DRM Master.
+[2026-09-17 22:03:00] AGENT -> REPO | Khắc phục và Kiểm chứng thực tế:
+1. Sửa kiosk_manager.py:
+   - Thêm hàm is_monitor_asleep() truy vấn trực tiếp phần cứng qua 'DISPLAY=:0 xset q' ("Monitor is Off" vs "Monitor is On"), đồng bộ hai chiều cờ MONITOR_ASLEEP với phần cứng.
+   - Thay thế toàn bộ '-dpms' thành '+dpms' trong wake_display(), sleep_display(), on_stream_started() và on_stream_ended(), đảm bảo DPMS luôn ở trạng thái 'DPMS is Enabled'.
+   - Loại bỏ chuỗi "Initialized GStreamer video renderer" và "identified as Connection type RAOP" khỏi danh sách trigger stream start trong monitor_uxplay_output().
+   - Sử dụng is_monitor_asleep() trong display_power_manager() và hotplug_and_network_watcher() để tránh hiện tượng vòng lặp đánh thức khi nhận kernel DRM change uevent.
+   - Loại bỏ lệnh modetest không cần thiết và dựa hoàn toàn vào Xorg xset DPMS chuẩn xác.
+2. Kiểm chứng thực tế trên TV Box (192.168.2.97):
+   - Triển khai tệp lên /opt/airplay/kiosk_manager.py và khởi động lại airplay-kiosk.service.
+   - Kiểm tra chu kỳ 30s sleep: Sau đúng 30 giây không hoạt động, ghi nhận log '[Kiosk] Idle 30s: Display entered DPMS SLEEP', xset q báo 'DPMS is Enabled' và 'Monitor is Off'.
+   - Kiểm tra đánh thức: Giả lập di chuyển chuột (xdotool mousemove_relative), màn hình lập tức bật sáng ('Monitor is On'), log ghi nhận '[Kiosk] Display WOKEN UP (Mouse movement)'.
+   - Kiểm tra ngủ lại (re-sleep): Sau 30 giây tiếp theo không thao tác, màn hình tự động tắt trở lại ('Monitor is Off') ổn định 100%.

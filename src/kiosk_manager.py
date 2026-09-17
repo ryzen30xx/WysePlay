@@ -429,16 +429,31 @@ def autonomous_airplay_announcer():
             pass
         time.sleep(2.5)
 
+def is_monitor_asleep():
+    global MONITOR_ASLEEP
+    disp = os.environ.get("DISPLAY", ":0")
+    if os.path.exists("/tmp/.X11-unix/X0") or os.environ.get("DISPLAY"):
+        try:
+            out = subprocess.check_output(f"DISPLAY={disp} xset q 2>/dev/null", shell=True).decode()
+            if "Monitor is Off" in out:
+                MONITOR_ASLEEP = True
+                return True
+            elif "Monitor is On" in out:
+                MONITOR_ASLEEP = False
+                return False
+        except Exception:
+            pass
+    return MONITOR_ASLEEP
+
 def wake_display(reason="Activity"):
     global LAST_ACTIVITY, MONITOR_ASLEEP
     LAST_ACTIVITY = time.time()
-    if MONITOR_ASLEEP:
+    disp = os.environ.get("DISPLAY", ":0")
+    if MONITOR_ASLEEP or is_monitor_asleep():
         MONITOR_ASLEEP = False
         subprocess.run('echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true', shell=True)
-        subprocess.run('modetest -M sun4i-drm -w 49:DPMS:0 >/dev/null 2>&1 || true', shell=True)
-        disp = os.environ.get("DISPLAY", ":0")
+        subprocess.run(f'DISPLAY={disp} xset +dpms s off s noblank 2>/dev/null', shell=True)
         subprocess.run(f'DISPLAY={disp} xset dpms force on 2>/dev/null', shell=True)
-        subprocess.run(f'DISPLAY={disp} xset -dpms s off s noblank 2>/dev/null', shell=True)
         if not CURRENT_LOCKED:
             apply_standby_wallpaper()
         print(f"[Kiosk] Display WOKEN UP ({reason}): Monitor panel & backlight ON.")
@@ -446,7 +461,8 @@ def wake_display(reason="Activity"):
 def sleep_display():
     global MONITOR_ASLEEP
     with STATE_LOCK:
-        if MONITOR_ASLEEP:
+        if is_monitor_asleep():
+            MONITOR_ASLEEP = True
             return
         if CURRENT_LOCKED:
             return
@@ -454,7 +470,6 @@ def sleep_display():
             return
         MONITOR_ASLEEP = True
         subprocess.run('echo 1 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true', shell=True)
-        subprocess.run('modetest -M sun4i-drm -w 49:DPMS:3 >/dev/null 2>&1 || true', shell=True)
         disp = os.environ.get("DISPLAY", ":0")
         subprocess.run(f'DISPLAY={disp} xset +dpms 2>/dev/null', shell=True)
         subprocess.run(f'DISPLAY={disp} xset dpms force off 2>/dev/null', shell=True)
@@ -572,12 +587,12 @@ def display_power_manager():
         # 2. If streaming or displaying PIN OTP, keep active and cancel sleep
         if CURRENT_LOCKED or os.path.exists("/tmp/airplay_pin.txt"):
             LAST_ACTIVITY = time.time()
-            if MONITOR_ASLEEP:
+            if MONITOR_ASLEEP or is_monitor_asleep():
                 wake_display(reason="AirPlay streaming or PIN modal active")
             continue
 
         # 3. Check 30s idle timeout
-        if not MONITOR_ASLEEP:
+        if not is_monitor_asleep():
             idle_time = time.time() - LAST_ACTIVITY
             if idle_time >= SLEEP_TIMEOUT:
                 sleep_display()
@@ -612,7 +627,7 @@ def on_stream_started():
         subprocess.run('DISPLAY=:0 xsetroot -cursor_name blank 2>/dev/null', shell=True)
         subprocess.run('DISPLAY=:0 xsetroot -solid "#000000" 2>/dev/null', shell=True)
         subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
-        subprocess.run('DISPLAY=:0 xset -dpms s off 2>/dev/null', shell=True)
+        subprocess.run('DISPLAY=:0 xset +dpms s off s noblank 2>/dev/null', shell=True)
         print("[Kiosk] AirPlay stream started: Woke up monitor, kept screen awake & hid mouse.")
 
 def on_stream_ended():
@@ -630,7 +645,7 @@ def on_stream_ended():
         disp = os.environ.get("DISPLAY", ":0")
         subprocess.run(f"DISPLAY={disp} xdotool search --class WifiKiosk windowmap 2>/dev/null", shell=True)
         subprocess.run(f'DISPLAY={disp} xsetroot -cursor_name left_ptr 2>/dev/null', shell=True)
-        subprocess.run(f'DISPLAY={disp} xset -dpms s off s noblank 2>/dev/null', shell=True)
+        subprocess.run(f'DISPLAY={disp} xset +dpms s off s noblank 2>/dev/null', shell=True)
         subprocess.run(f'DISPLAY={disp} xset dpms force on 2>/dev/null', shell=True)
         apply_standby_wallpaper()
         wake_display(reason="AirPlay stream ended, standby restored")
@@ -785,9 +800,7 @@ def monitor_uxplay_output(proc):
 
                 # 3. Stream lifecycle
                 if (
-                    "Initialized GStreamer video renderer" in line
-                    or "identified as Connection type RAOP" in line
-                    or "raop_rtp_mirror starting mirroring" in line
+                    "raop_rtp_mirror starting mirroring" in line
                     or "Begin streaming to GStreamer video pipeline" in line
                 ):
                     try:
@@ -986,7 +999,7 @@ def hotplug_and_network_watcher():
                     disconnect_strikes = 0
                     if event_triggered:
                         # Do not wake up or reconfigure display while in DPMS sleep
-                        if MONITOR_ASLEEP:
+                        if is_monitor_asleep():
                             continue
                         time.sleep(1.0)
                         disp = os.environ.get("DISPLAY", ":0")
