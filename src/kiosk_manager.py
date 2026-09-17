@@ -575,14 +575,42 @@ def monitor_uxplay_output(proc):
     """
     Reads UxPlay stdout line-by-line in real time.
     Detects stream start, PIN prompts, and end events with 0ms delay.
+    Maintains a strictly bounded log size (max ~1MB) to protect RAM.
     """
+    log_file = "/tmp/uxplay.log"
     try:
-        with open("/tmp/uxplay.log", "a") as ux_log:
+        # Check size before opening, truncate if > 1MB
+        try:
+            if os.path.exists(log_file) and os.path.getsize(log_file) > 1048576:
+                with open(log_file, "r", errors="ignore") as f:
+                    tail_lines = f.readlines()[-1000:]
+                with open(log_file, "w") as f:
+                    f.writelines(tail_lines)
+        except Exception:
+            pass
+
+        line_count = 0
+        with open(log_file, "a") as ux_log:
             for line in iter(proc.stdout.readline, ''):
                 if not line:
                     break
                 ux_log.write(line)
                 ux_log.flush()
+                line_count += 1
+
+                # Periodically truncate if log grows past 1MB during long sessions
+                if line_count >= 500:
+                    line_count = 0
+                    try:
+                        if os.path.getsize(log_file) > 1048576:
+                            ux_log.close()
+                            with open(log_file, "r", errors="ignore") as f:
+                                tail_lines = f.readlines()[-1000:]
+                            with open(log_file, "w") as f:
+                                f.writelines(tail_lines)
+                            ux_log = open(log_file, "a")
+                    except Exception:
+                        pass
 
                 # 1. Wake display instantly upon any incoming client connection request
                 if (
@@ -1288,7 +1316,6 @@ def main():
             '-reset', '0',
             '-nofreeze',
             '-vsync', 'no',
-            '-FPSdata',
             '-vs', video_sink
         ]
         if not is_drm_mode and video_sink not in ("kmssink",):
@@ -1296,6 +1323,15 @@ def main():
         cmd.extend(extra_flags)
 
         print(f"[Kiosk] Starting UxPlay as '{monitor_name}' with {target_res}@{target_fps}Hz (Monitor: {res}@{rate}Hz, standard ports -p, smooth clock-synced)...")
+        try:
+            if os.path.exists("/tmp/uxplay.log") and os.path.getsize("/tmp/uxplay.log") > 1048576:
+                with open("/tmp/uxplay.log", "r", errors="ignore") as f:
+                    tail_lines = f.readlines()[-1000:]
+                with open("/tmp/uxplay.log", "w") as f:
+                    f.writelines(tail_lines)
+        except Exception:
+            pass
+
         with open("/tmp/uxplay.log", "a") as ux_log:
             ux_log.write(f"\n--- [Kiosk] UxPlay Starting at {time.strftime('%Y-%m-%d %H:%M:%S')} (cmd: {' '.join(cmd)}) ---\n")
             ux_log.flush()

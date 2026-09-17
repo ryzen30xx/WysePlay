@@ -58,5 +58,10 @@ if [ -n "$DISPLAY" ]; then
     fi
 fi
 
+# Keep /tmp/kiosk.log bounded to <= 1MB
+if [ -f /tmp/kiosk.log ] && [ $(stat -c%s /tmp/kiosk.log 2>/dev/null || echo 0) -gt 1048576 ]; then
+    tail -n 1000 /tmp/kiosk.log > /tmp/kiosk.log.tmp && mv /tmp/kiosk.log.tmp /tmp/kiosk.log
+fi
+
 # Run Kiosk Manager in native DRM or X11 mode
 exec python3 -u /opt/airplay/kiosk_manager.py 2>&1 | tee -a /tmp/kiosk.log
