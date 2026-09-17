@@ -102,3 +102,26 @@
 3. Kiểm chứng thực tế:
    - airplay-kiosk.service khởi động hoàn hảo với 'Sink: glimagesink', PID 4067526.
    - Kiểm tra mDNS từ Mac: Phản hồi 0.001s tức thì, hiển thị chuẩn xác mục Apple TV P27FBA-RAGL. Sẵn sàng cho người dùng kết nối trải nghiệm độ mượt mới.
+
+[2026-09-17 21:48:00] USER -> AGENT | Báo cáo: Màn hình standby hiện tại đang bị lỗi đen xì; yêu cầu điều tra code và sửa lại.
+[2026-09-17 21:48:15] AGENT -> SYSTEM | Root Cause Diagnosis:
+1. Cơ chế on_stream_started() gọi 'DISPLAY=:0 xsetroot -solid "#000000"' để bôi đen màn hình root X11 phục vụ hiển thị video AirPlay.
+2. Khi phiên stream kết thúc hoặc client ngắt kết nối:
+   - on_stream_ended() chỉ gọi wake_display(), nhưng trong wake_display() lại chặn gọi apply_standby_wallpaper() bằng điều kiện 'if MONITOR_ASLEEP:'. Do màn hình đang thức trong suốt quá trình stream (MONITOR_ASLEEP == False), hàm wake_display() bỏ qua hoàn toàn việc khôi phục hình nền!
+   - Nếu window_watcher bắt được cửa sổ biến mất trước khi monitor_uxplay_output đọc dòng 'Destroying connection', CURRENT_LOCKED chuyển về False mà không áp dụng hình nền. Khi monitor_uxplay_output đọc được dòng ngắt kết nối sau đó, cờ CURRENT_LOCKED đã là False nên tiếp tục bỏ qua apply_standby_wallpaper().
+   - Khi có sự kiện DRM change (TV bật tắt hoặc đổi nguồn HDMI), hotplug_and_network_watcher chạy 'xrandr --auto' làm reset root window về đen nhưng không phục hồi hình nền standby.
+[2026-09-17 21:48:30] AGENT -> REPO | Khắc phục triệt để và Kiểm chứng:
+1. Sửa kiosk_manager.py:
+   - Trong on_stream_ended(): Gọi trực tiếp apply_standby_wallpaper() bên trong STATE_LOCK; kể cả khi đã unlock cũng tự bảo vệ gọi apply_standby_wallpaper().
+   - Trong wake_display(): Tách biệt logic đánh thức và khôi phục hình nền, bảo đảm khi không streaming (not CURRENT_LOCKED) thì luôn có hình nền standby.
+   - Trong monitor_uxplay_output(): Bỏ guard CURRENT_LOCKED ở các chuỗi kết thúc luồng ("Destroying connection", "running is no longer true", "video has finished", "raop_rtp_mirror stopping mirroring", "Stopping mirror audio") để luôn gọi on_stream_ended() và apply_standby_wallpaper().
+   - Trong hotplug_and_network_watcher(): Bổ sung apply_standby_wallpaper() sau khi xrandr --auto hoàn tất nếu không trong luồng stream.
+   - Khi tiến trình UxPlay thoát (CURRENT_PROC.wait()): Bổ sung apply_standby_wallpaper() ngay sau on_stream_ended().
+2. Sửa make_wallpaper.py:
+   - generate_wallpaper() tự động áp dụng ngay lập tức vào X11 root window bằng feh nếu X11 đang chạy và không có luồng stream hoạt động.
+3. Kiểm chứng thực tế trên TV Box:
+   - Triển khai scp sang /opt/airplay/kiosk_manager.py và /opt/airplay/make_wallpaper.py.
+   - Khởi động lại airplay-kiosk.service.
+   - Chụp màn hình DISPLAY=:0 và phân tích màu sắc: Màn hình hiển thị đầy đủ hình nền standby sắc nét 1920x1080 (197 mã màu, text và icon rõ ràng).
+   - Mô phỏng chu kỳ on_stream_started() -> màn hình đen 1 màu (#000000) -> on_stream_ended() -> khôi phục tức thì 197 màu hình nền standby thành công 100%.
+

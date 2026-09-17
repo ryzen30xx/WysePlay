@@ -537,6 +537,15 @@ def generate_wallpaper(wifi_gui_showing=None, wait_sync=False):
     except Exception:
         pass
 
+    # Apply to X11 root window via feh if X11 is running and not streaming
+    if not os.path.exists("/tmp/airplay_streaming"):
+        disp = os.environ.get("DISPLAY", ":0")
+        if os.path.exists("/tmp/.X11-unix/X0") or os.environ.get("DISPLAY"):
+            try:
+                subprocess.run(f'DISPLAY={disp} feh --no-fehbg --bg-fill {out_file} 2>/dev/null', shell=True)
+            except Exception:
+                pass
+
     layout_mode = "Shifted-Right (Wi-Fi Modal Active)" if wifi_gui_showing else "Centered"
     print(f"Wallpaper saved: {out_file} (Monitor: {monitor_name}, Net: {net_type}, Layout: {layout_mode}, Res: {res})")
     return monitor_name, res, rate

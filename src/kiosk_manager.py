@@ -1,5 +1,7 @@
 import os, sys, time, subprocess, re, signal, threading, glob, json, socket, struct, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+if not os.environ.get("DISPLAY") and (os.path.exists("/tmp/.X11-unix/X0") or os.path.exists("/dev/dri/card0")):
+    os.environ["DISPLAY"] = ":0"
 try:
     sys.stdout.reconfigure(line_buffering=True)
 except Exception:
@@ -434,10 +436,11 @@ def wake_display(reason="Activity"):
         MONITOR_ASLEEP = False
         subprocess.run('echo 0 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true', shell=True)
         subprocess.run('modetest -M sun4i-drm -w 49:DPMS:0 >/dev/null 2>&1 || true', shell=True)
-        if os.environ.get("DISPLAY"):
-            subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
-            subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
-        apply_standby_wallpaper()
+        disp = os.environ.get("DISPLAY", ":0")
+        subprocess.run(f'DISPLAY={disp} xset dpms force on 2>/dev/null', shell=True)
+        subprocess.run(f'DISPLAY={disp} xset -dpms s off s noblank 2>/dev/null', shell=True)
+        if not CURRENT_LOCKED:
+            apply_standby_wallpaper()
         print(f"[Kiosk] Display WOKEN UP ({reason}): Monitor panel & backlight ON.")
 
 def sleep_display():
@@ -452,16 +455,22 @@ def sleep_display():
         MONITOR_ASLEEP = True
         subprocess.run('echo 1 | sudo tee /sys/class/graphics/fb0/blank >/dev/null 2>&1 || true', shell=True)
         subprocess.run('modetest -M sun4i-drm -w 49:DPMS:3 >/dev/null 2>&1 || true', shell=True)
-        if os.environ.get("DISPLAY"):
-            subprocess.run('DISPLAY=:0 xset +dpms 2>/dev/null', shell=True)
-            subprocess.run('DISPLAY=:0 xset dpms force off 2>/dev/null', shell=True)
+        disp = os.environ.get("DISPLAY", ":0")
+        subprocess.run(f'DISPLAY={disp} xset +dpms 2>/dev/null', shell=True)
+        subprocess.run(f'DISPLAY={disp} xset dpms force off 2>/dev/null', shell=True)
         print("[Kiosk] Idle 30s: Display entered DPMS SLEEP (monitor panel & backlight OFF).")
 
 def apply_standby_wallpaper():
+    base_p = "/opt/airplay/standby.png"
+    if not os.path.exists(base_p) or os.path.getsize(base_p) == 0:
+        try:
+            make_wallpaper.generate_wallpaper(wait_sync=False)
+        except Exception as e:
+            print(f"[Kiosk] Error generating missing standby wallpaper: {e}", flush=True)
+
     try:
         if os.path.exists("/dev/fb0"):
             from PIL import Image
-            base_p = "/opt/airplay/standby.png"
             if os.path.exists(base_p):
                 img = Image.open(base_p).convert("RGB")
                 fb_w, fb_h = 1920, 1080
@@ -478,8 +487,10 @@ def apply_standby_wallpaper():
                     fb.write(raw)
     except Exception as e:
         print(f"[Kiosk] Error applying fb0 wallpaper: {e}", flush=True)
-    if os.environ.get("DISPLAY"):
-        subprocess.run('DISPLAY=:0 feh --no-fehbg --bg-fill /opt/airplay/standby.png 2>/dev/null', shell=True)
+
+    disp = os.environ.get("DISPLAY", ":0")
+    if os.path.exists("/tmp/.X11-unix/X0") or os.environ.get("DISPLAY"):
+        subprocess.run(f'DISPLAY={disp} feh --no-fehbg --bg-fill {base_p} 2>/dev/null', shell=True)
 
 def render_pin_modal_fb0(pin, client_name=None):
     if not os.path.exists("/dev/fb0"):
@@ -608,6 +619,7 @@ def on_stream_ended():
     global CURRENT_LOCKED
     with STATE_LOCK:
         if not CURRENT_LOCKED:
+            apply_standby_wallpaper()
             return
         CURRENT_LOCKED = False
         try:
@@ -615,10 +627,12 @@ def on_stream_ended():
                 os.remove("/tmp/airplay_streaming")
         except OSError:
             pass
-        subprocess.run("DISPLAY=:0 xdotool search --class WifiKiosk windowmap 2>/dev/null", shell=True)
-        subprocess.run('DISPLAY=:0 xsetroot -cursor_name left_ptr 2>/dev/null', shell=True)
-        subprocess.run('DISPLAY=:0 xset -dpms s off s noblank 2>/dev/null', shell=True)
-        subprocess.run('DISPLAY=:0 xset dpms force on 2>/dev/null', shell=True)
+        disp = os.environ.get("DISPLAY", ":0")
+        subprocess.run(f"DISPLAY={disp} xdotool search --class WifiKiosk windowmap 2>/dev/null", shell=True)
+        subprocess.run(f'DISPLAY={disp} xsetroot -cursor_name left_ptr 2>/dev/null', shell=True)
+        subprocess.run(f'DISPLAY={disp} xset -dpms s off s noblank 2>/dev/null', shell=True)
+        subprocess.run(f'DISPLAY={disp} xset dpms force on 2>/dev/null', shell=True)
+        apply_standby_wallpaper()
         wake_display(reason="AirPlay stream ended, standby restored")
         print("[Kiosk] AirPlay stream ended: Restored standby wallpaper (30s sleep timer started).")
 
@@ -790,13 +804,12 @@ def monitor_uxplay_output(proc):
                     or "Stopping mirror audio" in line
                 ):
                     try:
-                        if CURRENT_LOCKED and os.path.exists("/tmp/airplay_pin.txt"):
+                        if os.path.exists("/tmp/airplay_pin.txt"):
                             os.remove("/tmp/airplay_pin.txt")
                     except Exception:
                         pass
-                    if CURRENT_LOCKED:
-                        on_stream_ended()
-                        apply_standby_wallpaper()
+                    on_stream_ended()
+                    apply_standby_wallpaper()
                     # Keep UxPlay running as a permanent daemon across sessions:
                     # Do not kill UxPlay on disconnect, preventing mDNS flapping and device disappearance on client devices.
     except Exception as e:
@@ -976,7 +989,8 @@ def hotplug_and_network_watcher():
                         if MONITOR_ASLEEP:
                             continue
                         time.sleep(1.0)
-                        subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
+                        disp = os.environ.get("DISPLAY", ":0")
+                        subprocess.run(f'DISPLAY={disp} xrandr --auto', shell=True)
                         time.sleep(0.5)
 
                         res, rate, name = make_wallpaper.get_display_info()
@@ -985,7 +999,7 @@ def hotplug_and_network_watcher():
 
                         if CURRENT_DISPLAY is not None and new_info != CURRENT_DISPLAY:
                             time.sleep(1.0)
-                            subprocess.run('DISPLAY=:0 xrandr --auto', shell=True)
+                            subprocess.run(f'DISPLAY={disp} xrandr --auto', shell=True)
                             time.sleep(0.5)
                             res2, rate2, name2 = make_wallpaper.get_display_info()
                             has_audio2, _ = check_hdmi_audio_support()
@@ -993,6 +1007,9 @@ def hotplug_and_network_watcher():
 
                             if stable_info != CURRENT_DISPLAY and stable_info[0] not in ("None", "Unknown"):
                                 restart_uxplay_for_display(stable_info)
+                        else:
+                            if not CURRENT_LOCKED:
+                                apply_standby_wallpaper()
             except Exception as e:
                 print("[Hotplug] Check error:", e)
 
@@ -1461,6 +1478,7 @@ def main():
         
         # When UxPlay exits, ensure inputs and UI are restored
         on_stream_ended()
+        apply_standby_wallpaper()
 
         # Defensive backoff & Fail-Safe Auto-Recovery
         elapsed = time.time() - start_time
